@@ -1,0 +1,6 @@
+{
+  "name": "TXT Extractor Bot",
+  "description": "Telegram TXT Extraction Bot for course contents, video streams, and PDFs",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

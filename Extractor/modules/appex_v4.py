@@ -428,7 +428,6 @@ async def appex_v5_txt(app, message, api, name):
                 break
         except Exception as e:
             if "Broken pipe" in str(e) or "Connection reset" in str(e):
-                import time
                 time.sleep(1)
                 continue
             else:

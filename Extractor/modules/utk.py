@@ -103,61 +103,336 @@ def decrypt(enc):
     b = plaintext.decode('utf-8')
     return b
 
+def transform_utk_key(base_str, salt):
+    t = list(base_str)
+    res = ""
+    for ch in salt:
+        if ch.isdigit():
+            r = int(ch)
+            if 0 <= r < len(t):
+                res += t[r]
+    return res
+
+def pad16_utk(st):
+    if len(st) < 16:
+        return st.ljust(16, "0")
+    elif len(st) > 16:
+        return st[:16]
+    return st
+
+def encrypt_utk_web(plaintext, salt=None):
+    a = "%!F*&^$)_*%3f&B+"
+    s = "#*$DJvyw2w%!_-$@"
+    t = transform_utk_key(a, salt) if salt else a
+    l = transform_utk_key(s, salt) if salt else s
+    kd = pad16_utk(t).encode("utf-8")
+    kc = pad16_utk(l).encode("utf-8")
+    cipher = AES.new(kd, AES.MODE_CBC, kc)
+    ct = cipher.encrypt(pad(plaintext.encode("utf-8"), AES.block_size))
+    ct_b64 = base64.b64encode(ct).decode("utf-8")
+    salt_b64 = base64.b64encode((salt or "").encode("utf-8")).decode("utf-8")
+    return f"{ct_b64}:{salt_b64}"
+
+def decrypt_utk_web(ciphertext, salt=None):
+    if not ciphertext:
+        return None
+    a = "%!F*&^$)_*%3f&B+"
+    s = "#*$DJvyw2w%!_-$@"
+    t = transform_utk_key(a, salt) if salt else a
+    l = transform_utk_key(s, salt) if salt else s
+    kd = pad16_utk(t).encode("utf-8")
+    kc = pad16_utk(l).encode("utf-8")
+    u = ciphertext.split(":")[0]
+    raw = base64.b64decode(u)
+    cipher = AES.new(kd, AES.MODE_CBC, kc)
+    pt = unpad(cipher.decrypt(raw), AES.block_size).decode("utf-8")
+    return pt
+
+def get_utk_guest_jwt():
+    """Fetch guest JWT token required by application.utkarshapp.com API"""
+    try:
+        r = requests.get("https://utkarsh.com/api/guest-login", headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        data = r.json()
+        return data.get("jwt", "")
+    except Exception as e:
+        print(colored(f"⚠️ Guest JWT fetch error: {e}", "yellow"))
+        return ""
+
+def send_utk_otp(mobile):
+    """Send login OTP to mobile number via Utkarsh API"""
+    try:
+        guest_jwt = get_utk_guest_jwt()
+        key_seed = "0016108641027451"
+        payload = json.dumps({
+            "mobile": str(mobile),
+            "is_social": 0,
+            "#otp": "",
+            "is_registration": 0,
+            "resend": 0,
+            "device_id": "testingapi",
+            "device_token": "testingpostmanrequest"
+        })
+        enc_body = encrypt_utk_web(payload, key_seed)
+        headers = {
+            "lang": "1",
+            "version": "1",
+            "Devicetype": "4",
+            "Authorization": "Bearer 01*#NerglnwwebOI)30@I*Dm'@@",
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+            "Userid": "0"
+        }
+        if guest_jwt:
+            headers["Jwt"] = guest_jwt
+        res = requests.post(
+            "https://application.utkarshapp.com/data_model/users/login_with_otp",
+            data=json.dumps(enc_body),
+            headers=headers,
+            timeout=15
+        )
+        resp_text = res.text.strip().strip('"')
+        dec_json_str = decrypt_utk_web(resp_text, key_seed)
+        if dec_json_str:
+            data = json.loads(dec_json_str)
+            status = data.get("status", False)
+            msg = data.get("message", "Failed to send OTP")
+            return status, msg, guest_jwt
+        return False, "Failed to decrypt response from Utkarsh", guest_jwt
+    except Exception as e:
+        return False, str(e), ""
+
+def verify_utk_otp(mobile, otp, guest_jwt, sess):
+    """Verify login OTP and automatically establish session on online.utkarsh.com"""
+    try:
+        key_seed = "0016108641027451"
+        payload = json.dumps({
+            "mobile": str(mobile),
+            "is_social": 0,
+            "otp": str(otp),
+            "is_registration": 0,
+            "resend": 0,
+            "cta_action": "",
+            "device_id": "testingapi",
+            "device_token": "testingpostmanrequest"
+        })
+        enc_body = encrypt_utk_web(payload, key_seed)
+        headers = {
+            "lang": "1",
+            "version": "1",
+            "Devicetype": "4",
+            "Authorization": "Bearer 01*#NerglnwwebOI)30@I*Dm'@@",
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+            "Userid": "0"
+        }
+        if guest_jwt:
+            headers["Jwt"] = guest_jwt
+        res = requests.post(
+            "https://application.utkarshapp.com/data_model/users/login_with_otp",
+            data=json.dumps(enc_body),
+            headers=headers,
+            timeout=15
+        )
+        resp_text = res.text.strip().strip('"')
+        dec_json_str = decrypt_utk_web(resp_text, key_seed)
+        if not dec_json_str:
+            return False, "Failed to decrypt OTP verification response", None
+        
+        data = json.loads(dec_json_str)
+        status = data.get("status", False)
+        msg = data.get("message", "OTP verification failed")
+        if not status:
+            return False, msg, None
+
+        user_data = data.get("data", {})
+        jwt_token = user_data.get("jwt", "") if isinstance(user_data, dict) else ""
+        if not jwt_token:
+            return False, "No JWT token in response", None
+
+        # Auto-login to online.utkarsh.com using the new JWT to obtain session cookies
+        enc_obj = json.dumps({"jwt": jwt_token, "redirect_url": "https://online.utkarsh.com/web/Study/index"})
+        enc_web_token = encrypt_utk_web(enc_obj, "0161086410274515")
+        b64_web = base64.b64encode(enc_web_token.encode()).decode()
+        target_url = f"https://online.utkarsh.com/web/web_panel_ini/auto_login_web?web_token={b64_web}"
+        sess.get(target_url, headers={"Referer": "https://utkarsh.com/"}, timeout=TIMEOUT, allow_redirects=True)
+        return True, "Login successful", jwt_token
+    except Exception as e:
+        return False, str(e), None
+
 @app.on_message(filters.command(["utkarsh", "utk", "utk_dl"]))  # Added more handlers
 async def handle_utk_logic(app, m):
     session_manager = SessionManager(app)
     start_time = time.time()
     editable = await m.reply_text(
         "🔹 <b>UTK EXTRACTOR PRO</b> 🔹\n\n"
-        "Send **ID & Password** in this format: <code>ID*Password</code>"
+        "Send your login credentials or token in any format:\n\n"
+        "1️⃣ <b>Mobile Number Only (OTP Login):</b>\n"
+        "   <code>9876543210</code> (10-digit number)\n"
+        "2️⃣ <b>ID & Password:</b>\n"
+        "   <code>Mobile*Password</code>\n"
+        "3️⃣ <b>Auto-Login URL / Web Token / JWT:</b>\n"
+        "   <code>https://online.utkarsh.com/web/web_panel_ini/auto_login_web?web_token=...</code>\n"
+        "4️⃣ <b>Cookies:</b>\n"
+        "   <code>ci_session=...; csrf_name=...</code>"
     )
     # After getting user response
     input1 = await app.listen(chat_id=m.chat.id)
     await forward_to_log(input1, "Utkarsh Extractor")
 
-    raw_text = input1.text
+    raw_text = input1.text.strip()
     await input1.delete()
     
     print(colored("🔄 Attempting login to Utkarsh...", "cyan"))
+    await safe_edit_message(editable, "🔄 <b>Connecting to Utkarsh servers...</b>")
     
-    # Improved token fetch with retry logic
-    for attempt in range(MAX_RETRIES):
+    sess = requests.Session()
+    default_headers = {
+        'accept': 'application/json, text/javascript, */*; q=0.01',
+        'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        'x-requested-with': 'XMLHttpRequest',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+        'origin': 'https://online.utkarsh.com',
+        'referer': 'https://online.utkarsh.com/web/Study/index'
+    }
+    sess.headers.update(default_headers)
+    
+    token = ""
+    logged_in = False
+
+    # Check for mobile-only login (10 digits or with +91)
+    clean_digits = re.sub(r'[\s\-\+]', '', raw_text)
+    if clean_digits.startswith('91') and len(clean_digits) == 12:
+        clean_digits = clean_digits[2:]
+    
+    # 1. Handle Mobile Number Only (OTP Flow)
+    if clean_digits.isdigit() and len(clean_digits) == 10 and '*' not in raw_text and '=' not in raw_text:
+        mobile_num = clean_digits
+        print(colored(f"📱 Detected mobile-only login request for {mobile_num}", "cyan"))
+        await safe_edit_message(editable, f"🔄 <b>Sending OTP to {mobile_num}... Please wait!</b>")
+        
+        otp_sent, otp_msg, guest_jwt = send_utk_otp(mobile_num)
+        if not otp_sent:
+            await safe_edit_message(editable, f"❌ <b>Failed to send OTP:</b> {otp_msg}\n\nPlease check your mobile number or try ID*Password.")
+            print(colored(f"❌ Failed to send OTP: {otp_msg}", "red"))
+            return
+            
+        await safe_edit_message(
+            editable,
+            f"✅ <b>OTP Sent Successfully!</b>\n\n"
+            f"📱 Mobile: <code>{mobile_num}</code>\n"
+            f"📬 Please check your SMS and send the 6-digit OTP below:"
+        )
+        
+        otp_input = await app.listen(chat_id=m.chat.id)
+        await forward_to_log(otp_input, "Utkarsh Extractor OTP")
+        entered_otp = otp_input.text.strip()
+        await otp_input.delete()
+        
+        await safe_edit_message(editable, "🔄 <b>Verifying OTP & logging in... Please wait!</b>")
+        v_ok, v_msg, jwt_token = verify_utk_otp(mobile_num, entered_otp, guest_jwt, sess)
+        
+        if v_ok:
+            token = sess.cookies.get("csrf_name", "")
+            logged_in = True
+            print(colored("✅ OTP login successful!", "green"))
+            await safe_edit_message(
+                editable,
+                f"✅ <b>Login Successful via OTP!</b>\n\n"
+                f"🔑 <b>Token:</b> <code>{jwt_token}</code>\n\n"
+                f"🔄 <i>Fetching your enrolled courses...</i>"
+            )
+        else:
+            await safe_edit_message(editable, f"❌ <b>Login Failed:</b> {v_msg}\n\nPlease try again with <code>/utk</code>.")
+            print(colored(f"❌ OTP verification failed: {v_msg}", "red"))
+            return
+
+    # 2. Check if user provided Auto-Login URL or Web Token or JWT
+    elif "auto_login_web" in raw_text or "web_token=" in raw_text or raw_text.startswith("ey") or (len(raw_text) > 100 and "*" not in raw_text and "=" in raw_text):
         try:
-            token_response = requests.get('https://online.utkarsh.com/web/home/get_states', timeout=TIMEOUT)
-            token = token_response.json()["token"]
-            print(colored(f"✅ Token obtained successfully", "green"))
-            break
-        except Exception as e:
-            if attempt < MAX_RETRIES - 1:
-                await asyncio.sleep(2)
-                continue
+            target_url = ""
+            if raw_text.startswith("http"):
+                target_url = raw_text
+            elif "web_token=" in raw_text:
+                target_url = f"https://online.utkarsh.com/web/web_panel_ini/auto_login_web?{raw_text}"
+            elif raw_text.startswith("ey"):
+                # Encrypt JWT for auto_login_web
+                enc_obj = json.dumps({"jwt": raw_text, "redirect_url": "https://online.utkarsh.com/web/Study/index"})
+                enc_web_token = encrypt_utk_web(enc_obj, "0161086410274515")
+                b64_web = base64.b64encode(enc_web_token.encode()).decode()
+                target_url = f"https://online.utkarsh.com/web/web_panel_ini/auto_login_web?web_token={b64_web}"
             else:
-                print(colored(f"❌ Failed to get token: {e}", "red"))
-                await safe_edit_message(editable, "❌ Failed to connect to Utkarsh servers. Please try again later.")
-                return
-    
-    headers = {
-            'accept':'application/json, text/javascript, */*; q=0.01',
-            'content-type':'application/x-www-form-urlencoded; charset=UTF-8',
-            'x-requested-with':'XMLHttpRequest',
-            'user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-            'origin':'https://online.utkarsh.com',
-            'accept-encoding':'gzip, deflate, br, zstd',
-            'accept-language':'en-US,en;q=0.9',
-            'cookie':f'csrf_name={token}; ci_session=tb0uld02neaa4ujs1g4idb6l8bmql8jh'}
-    
-    if '*' in raw_text:
-        ids, ps = raw_text.split("*")
-        data = "csrf_name="+token+"&mobile="+ids+"&url=0&password="+ps+"&submit=LogIn&device_token=null"
+                # Raw base64 web token
+                target_url = f"https://online.utkarsh.com/web/web_panel_ini/auto_login_web?web_token={raw_text}"
+            
+            print(colored(f"🔗 Calling Utkarsh auto-login endpoint...", "cyan"))
+            r_auto = sess.get(target_url, headers={"Referer": "https://utkarsh.com/"}, timeout=TIMEOUT, allow_redirects=True)
+            token = sess.cookies.get("csrf_name", "")
+            if token:
+                logged_in = True
+                print(colored("✅ Authenticated via Utkarsh web token!", "green"))
+                await safe_edit_message(editable, "✅ <b>Authenticated successfully via Web Token!</b>")
+        except Exception as e:
+            print(colored(f"⚠️ Web token login error: {e}", "yellow"))
+
+    # 2. Check if user provided cookies directly
+    elif "ci_session=" in raw_text or "csrf_name=" in raw_text:
+        try:
+            for part in raw_text.split(";"):
+                part = part.strip()
+                if "=" in part:
+                    k, v = part.split("=", 1)
+                    sess.cookies.set(k.strip(), v.strip(), domain="online.utkarsh.com")
+            token = sess.cookies.get("csrf_name", "")
+            if token and sess.cookies.get("ci_session"):
+                logged_in = True
+                print(colored("✅ Session cookies set directly!", "green"))
+                await safe_edit_message(editable, "✅ <b>Authenticated via Session Cookies!</b>")
+        except Exception as e:
+            print(colored(f"⚠️ Cookie parsing error: {e}", "yellow"))
+
+    # 3. Handle ID*Password
+    elif '*' in raw_text:
+        # Fetch fresh CSRF token and ci_session from online.utkarsh.com
+        for attempt in range(MAX_RETRIES):
+            try:
+                init_res = sess.get('https://online.utkarsh.com/', timeout=TIMEOUT)
+                token = sess.cookies.get('csrf_name', '')
+                if not token:
+                    # Fallback pattern if cookie name varies
+                    token = sess.cookies.get('csrf_cookie_name', '')
+                if token:
+                    print(colored(f"✅ Dynamic token obtained from Utkarsh", "green"))
+                    break
+            except Exception as e:
+                if attempt < MAX_RETRIES - 1:
+                    await asyncio.sleep(2)
+                    continue
+                else:
+                    print(colored(f"❌ Failed to get initial cookies: {e}", "red"))
+        
+        if not token:
+            await safe_edit_message(editable, "❌ Failed to connect to Utkarsh servers. Please try again later.")
+            return
+
+        ids, ps = raw_text.split("*", 1)
+        data = f"csrf_name={token}&mobile={ids}&url=0&password={ps}&submit=LogIn&device_token=null"
         
         try:
-            log_response = requests.post('https://online.utkarsh.com/web/Auth/login', headers=headers, data=data, timeout=TIMEOUT).json()["response"].replace('MDE2MTA4NjQxMDI3NDUxNQ==','==').replace(':', '==')
-            dec_log = decrypt(log_response)
-            dec_logs = json.loads(dec_log)
-            error_message = dec_logs["message"]
-            status = dec_logs['status']
+            log_res = sess.post('https://online.utkarsh.com/web/Auth/login', data=data, timeout=TIMEOUT)
+            log_json = log_res.json()
+            if "response" in log_json:
+                log_response = log_json["response"].replace('MDE2MTA4NjQxMDI3NDUxNQ==', '==').replace(':', '==')
+                dec_log = decrypt(log_response)
+                dec_logs = json.loads(dec_log)
+                error_message = dec_logs.get("message", "Login failed")
+                status = dec_logs.get('status', False)
+            else:
+                status = log_json.get('status', False)
+                error_message = log_json.get('message', 'Login failed')
             
             if status:
+                token = sess.cookies.get("csrf_name", token)
+                logged_in = True
                 await safe_edit_message(editable, "✅ <b>Authentication successful!</b>")
                 print(colored("✅ Login successful!", "green"))
             else:
@@ -169,17 +444,43 @@ async def handle_utk_logic(app, m):
             print(colored(f"❌ Exception during login: {e}", "red"))
             return
     else:
-        await safe_edit_message(editable, "❌ <b>Invalid format!</b>\n\nPlease send ID and password in this format: <code>ID*Password</code>")
+        await safe_edit_message(editable, "❌ <b>Invalid format!</b>\n\nPlease send <code>Mobile*Password</code> or Auto-Login URL / JWT / Cookies.")
         return
+
+    if not logged_in:
+        await safe_edit_message(editable, "❌ <b>Authentication failed.</b> Please check your credentials or token.")
+        return
+
+    # Prepare cookies header for downstream requests
+    token = sess.cookies.get("csrf_name", token)
+    cookie_str = "; ".join([f"{c.name}={c.value}" for c in sess.cookies])
+    headers = default_headers.copy()
+    headers['cookie'] = cookie_str
 
     # Fetch course data with better error handling
     try:
-        data2 = "type=Batch&csrf_name="+ token +"&sort=0"
-        res2 = requests.post('https://online.utkarsh.com/web/Profile/my_course', headers=headers, data=data2, timeout=TIMEOUT).json()["response"].replace('MDE2MTA4NjQxMDI3NDUxNQ==','==').replace(':', '==')
-        decrypted_res = decrypt(res2)
-        dc = json.loads(decrypted_res)
-        dataxxx = dc['data']
-        bdetail = dataxxx.get("data", [])  
+        data2 = f"type=Batch&csrf_name={token}&sort=0"
+        course_post = sess.post('https://online.utkarsh.com/web/Profile/my_course', headers=headers, data=data2, timeout=TIMEOUT)
+        
+        try:
+            c_json = course_post.json()
+            if "response" in c_json:
+                res2 = c_json["response"].replace('MDE2MTA4NjQxMDI3NDUxNQ==', '==').replace(':', '==')
+                decrypted_res = decrypt(res2)
+                dc = json.loads(decrypted_res)
+            else:
+                dc = c_json
+        except Exception as e:
+            print(colored(f"⚠️ Non-JSON or encrypted response parsing: {e}", "yellow"))
+            dc = {}
+
+        dataxxx = dc.get('data', {})
+        if isinstance(dataxxx, dict):
+            bdetail = dataxxx.get("data", [])
+        elif isinstance(dataxxx, list):
+            bdetail = dataxxx
+        else:
+            bdetail = []
         
         if not bdetail:
             await safe_edit_message(editable, "❌ No courses found in your account.")
@@ -685,7 +986,7 @@ async def login(app, user_id, m, all_urls, start_time, bname, batch_id, progress
                     caption=caption,
                     thumb=thumb_path
                 )
-                await app.send_document(txt_dump, file_path, caption=caption_path)
+                await app.send_document(txt_dump, file_path, caption=caption)
             else:
                 copy = await m.reply_document(document=file_path, caption=caption)
                 await app.send_document(txt_dump, file_path, caption=caption)

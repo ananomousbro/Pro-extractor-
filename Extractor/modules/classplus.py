@@ -277,51 +277,120 @@ async def classplus_txt(app, message):
             await message.reply(f"Error: {str(e)}")
 
     elif len(user_input) > 20:
-        a = f"CLASSPLUS LOGIN SUCCESSFUL FOR\n\n<blockquote>`{user_input}`</blockquote>"
+        # Check if the token is actually an AppX / ClassX token
+        is_appx_token = False
+        appx_info = None
+        try:
+            parts = user_input.split(".")
+            if len(parts) >= 2:
+                padded = parts[1] + "=" * ((4 - len(parts[1]) % 4) % 4)
+                jwt_data = json.loads(base64.b64decode(padded).decode('utf-8', errors='ignore'))
+                
+                # Check for AppX signature
+                session_raw = jwt_data.get("session")
+                tenant_name = jwt_data.get("tenantName")
+                if session_raw and isinstance(session_raw, str) and "." in session_raw:
+                    s_parts = session_raw.split(".")
+                    s_padded = s_parts[1] + "=" * ((4 - len(s_parts[1]) % 4) % 4)
+                    s_data = json.loads(base64.b64decode(s_padded).decode('utf-8', errors='ignore'))
+                    tenant_name = s_data.get("tenantName") or tenant_name
+                
+                if tenant_name or jwt_data.get("tenantType") or "iv_ver" in jwt_data:
+                    is_appx_token = True
+                    appx_info = tenant_name
+        except Exception:
+            pass
+
+        if is_appx_token:
+            clean_name = (appx_info or "").replace("_db", "").replace("live", " Live").title() if appx_info else "AppX"
+            suggested_api = "websankulliveapi.classx.co.in" if "websankul" in str(appx_info).lower() else "your_coaching_api.classx.co.in"
+            await message.reply_text(
+                "⚠️ <b>यह Classplus का टोकन नहीं है!</b>\n\n"
+                f"📌 यह टोकन <b>AppX / ClassX ({clean_name})</b> का है।\n\n"
+                "👉 <b>लॉगिन करने के लिए सही तरीका:</b>\n"
+                "1️⃣ बोट में <code>/appx</code> कमांड भेजें।\n"
+                f"2️⃣ API URL में डालें: <code>{suggested_api}</code>\n"
+                "3️⃣ फिर यह टोकन पेस्ट करें।"
+            )
+            return
+
+        a = f"CLASSPLUS LOGIN ATTEMPT FOR\n\n<blockquote>`{user_input}`</blockquote>"
         await app.send_message(PREMIUM_LOGS, a)
-        headers = {
-            'x-access-token': user_input,
-            'user-agent': 'Mobile-Android',
-            'app-version': '1.4.65.3',
-            'api-version': '29',
-            'device-id': '39F093FF35F201D9'
-        }
-        response = s.get(f"{apiurl}/v2/courses?tabCategoryId=1", headers=headers)
-        if response.status_code == 200:
-            courses = response.json()["data"]["courses"]
-    
+
+        # Try multiple header configurations and endpoints for Classplus tokens
+        header_variants = [
+            {
+                'x-access-token': user_input,
+                'user-agent': 'Mobile-Android',
+                'app-version': '1.4.98.1',
+                'api-version': '51',
+                'device-id': str(uuid.uuid4()).replace('-', '')[:16]
+            },
+            {
+                'x-access-token': user_input,
+                'user-agent': 'Mobile-Android',
+                'app-version': '1.4.65.3',
+                'api-version': '29',
+                'device-id': '39F093FF35F201D9'
+            },
+            {
+                'x-access-token': user_input,
+                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                'accept': 'application/json, text/plain, */*',
+                'region': 'IN'
+            }
+        ]
+
+        courses_found = {}
+        last_error_msg = "Invalid token or no courses found"
+
+        for hdrs in header_variants:
+            endpoints_to_try = [
+                f"{apiurl}/v2/courses?tabCategoryId=1",
+                f"{apiurl}/v2/courses",
+                f"{apiurl}/v2/batches"
+            ]
+            for ep in endpoints_to_try:
+                try:
+                    resp = s.get(ep, headers=hdrs, timeout=12)
+                    if resp.status_code == 200:
+                        r_data = resp.json().get("data", {})
+                        c_list = r_data.get("courses") or r_data.get("batches") or []
+                        if isinstance(c_list, list) and len(c_list) > 0:
+                            for c in c_list:
+                                c_id = c.get("id") or c.get("batchId")
+                                c_name = c.get("name") or c.get("batchName")
+                                if c_id and c_name:
+                                    courses_found[c_id] = c_name
+                            if courses_found:
+                                break
+                    else:
+                        try:
+                            err_json = resp.json()
+                            if err_json.get("message"):
+                                last_error_msg = err_json["message"]
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+            if courses_found:
+                break
+
+        if courses_found:
             s.session_data = {
                 "token": user_input,
-                "courses": {course["id"]: course["name"] for course in courses}
+                "courses": courses_found
             }
 
             org_name = "Classplus"
-
-            for course in courses:
-                shareable_link = course.get("shareableLink", "")
-                if not shareable_link:
-                    continue
-                try:
-                    if "courses.store" in shareable_link:
-                        new_data = shareable_link.split('.')[0].split('//')[-1]
-                        org_response = s.get(f"https://api.classplusapp.com/v2/orgs/{new_data}", headers=headers)
-                        if org_response.status_code == 200:
-                            org_data = org_response.json().get("data", {})
-                            org_name = org_data.get("orgName", org_name)
-                    else:
-                        parts = shareable_link.split('//')
-                        if len(parts) > 1 and '.' in parts[1]:
-                            sub_parts = parts[1].split('.')
-                            if len(sub_parts) > 1:
-                                org_name = sub_parts[1]
-                except Exception:
-                    pass
-                if org_name and org_name != "Classplus":
-                    break
-
             await fetch_batches(app, message, org_name)
         else:
-            await message.reply("Invalid token. Please try again.")
+            await message.reply(
+                f"❌ <b>Login Failed:</b> {last_error_msg}\n\n"
+                "⚠️ कृपया सुनिश्चित करें कि:\n"
+                "• टोकन एक्सपायर न हुआ हो\n"
+                "• टोकन Classplus ऐप या web.classplusapp.com का ही हो"
+            )
     else:
         # User entered ORG Code (e.g. ABCD)
         org_code = user_input.strip()

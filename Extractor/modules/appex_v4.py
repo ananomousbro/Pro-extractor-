@@ -248,12 +248,12 @@ async def appex_v5_txt(app, message, api, name):
         "🎭 <b>ᴜɢ ᴇxᴛʀᴀᴄᴛᴏʀ ᴘʀᴏ</b> 🎭\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
         "📝 <b>ʜᴏᴡ ᴛᴏ ʟᴏɢɪɴ:</b>\n\n"
-        "1️⃣ ᴜsᴇ ɪᴅ & ᴘᴀssᴡᴏʀᴅ:\n"
+        "1️⃣ <b>ᴏɴʟʏ ᴍᴏʙɪʟᴇ ɴᴜᴍʙᴇʀ (ᴏᴛᴘ ʟᴏɢɪɴ):</b>\n"
+        "   <code>9876543210</code> (10-digit number)\n\n"
+        "2️⃣ <b>ɪᴅ & ᴘᴀssᴡᴏʀᴅ:</b>\n"
         "   <code>ID*Password</code>\n\n"
-        "2️⃣ ᴏʀ ᴜsᴇ ᴛᴏᴋᴇɴ ᴅɪʀᴇᴄᴛʟʏ\n\n"
-        "📌 <b>ᴇxᴀᴍᴘʟᴇs:</b>\n"
-        "• ɪᴅ/ᴘᴀss ➠ <code>9769696969*password123</code>\n"
-        "• ᴛᴏᴋᴇɴ ➠ <code>eyJhbGciOiJIUzI1...</code>\n\n"
+        "3️⃣ <b>ᴏʀ ᴜsᴇ ᴛᴏᴋᴇɴ ᴅɪʀᴇᴄᴛʟʏ:</b>\n"
+        "   <code>eyJhbGciOiJIUzI1...</code>\n\n"
         "━━━━━━━━━━━━━━━━━━━━━"
     )
     
@@ -264,7 +264,59 @@ async def appex_v5_txt(app, message, api, name):
     userid = None
     token = None
 
-    if '*' in raw_text:
+    # Check for mobile number only (OTP Flow)
+    clean_digits = re.sub(r'[\s\-\+]', '', raw_text)
+    if clean_digits.startswith('91') and len(clean_digits) == 12:
+        clean_digits = clean_digits[2:]
+
+    if clean_digits.isdigit() and len(clean_digits) == 10 and '*' not in raw_text and '.' not in raw_text:
+        mobile_num = clean_digits
+        status_msg = await message.reply_text(f"🔄 <b>Sending OTP to {mobile_num}... Please wait!</b>")
+        otp_headers = {
+            "Client-Service": "Appx",
+            "Auth-Key": "appxapi",
+            "source": "website",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+        try:
+            send_url = f"{api_base}/get/sendotp?phone={mobile_num}"
+            s_resp = requests.get(send_url, headers=otp_headers, timeout=15)
+            s_data = s_resp.json()
+            if s_data.get("status") == 200:
+                await status_msg.edit_text(
+                    f"✅ <b>OTP Sent Successfully!</b>\n\n"
+                    f"📱 Mobile: <code>{mobile_num}</code>\n"
+                    f"📬 Please check your SMS and enter the 6-digit OTP below:"
+                )
+                otp_input = await app.ask(message.chat.id, "🔑 <b>Enter the OTP:</b>")
+                await forward_to_log(otp_input, "Appex Extractor OTP")
+                entered_otp = otp_input.text.strip()
+
+                await status_msg.edit_text("🔄 <b>Verifying OTP & logging in... Please wait!</b>")
+                verify_url = f"{api_base}/get/otpverify?useremail={mobile_num}&otp={entered_otp}&device_id=WebBrowser17267591437616qmd1cxx313&mydeviceid=&mydeviceid2="
+                v_resp = requests.get(verify_url, headers=otp_headers, timeout=15)
+                v_data = v_resp.json()
+                if v_data.get("status") == 200:
+                    user_info = v_data.get("data") or v_data.get("user") or {}
+                    token = user_info.get("token") if isinstance(user_info, dict) else ""
+                    if not token and isinstance(v_data.get("token"), str):
+                        token = v_data["token"]
+                    userid = str(user_info.get("id") or user_info.get("userid") or extract_userid_from_jwt(token) or "-2")
+                    await status_msg.edit_text(
+                        f"✅ <b>Login Successful via OTP!</b>\n\n"
+                        f"🔑 <b>Token:</b> <code>{token}</code>\n\n"
+                        f"🔄 <i>Fetching your enrolled courses...</i>"
+                    )
+                else:
+                    fail_reason = v_data.get("message") or "Invalid OTP"
+                    return await status_msg.edit_text(f"❌ <b>OTP Verification Failed:</b> {fail_reason}\n\nPlease try again with <code>/appx</code>.")
+            else:
+                fail_reason = s_data.get("message") or "Failed to send OTP"
+                return await status_msg.edit_text(f"❌ <b>Failed to send OTP:</b> {fail_reason}\n\nPlease check your mobile number or try ID*Password.")
+        except Exception as e:
+            return await status_msg.edit_text(f"❌ <b>Error in OTP login:</b> {str(e)}")
+
+    elif '*' in raw_text:
         part1, part2 = raw_text.split("*", 1)
         part1, part2 = part1.strip(), part2.strip()
 

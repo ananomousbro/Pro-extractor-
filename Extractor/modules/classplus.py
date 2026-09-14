@@ -81,6 +81,39 @@ def parse_org_and_mobile(user_input: str):
     return None, None
 
 
+def find_token(obj):
+    """Recursively search for an auth token or JWT in any dict, list, or string."""
+    if isinstance(obj, str):
+        val = obj.strip()
+        if val.startswith("eyJ") or (len(val) > 24 and " " not in val and not val.startswith("http")):
+            return val
+        return None
+    elif isinstance(obj, dict):
+        priority_keys = ["token", "accessToken", "access_token", "userToken", "jwt", "authToken", "x-access-token"]
+        for key in priority_keys:
+            if key in obj:
+                val = obj[key]
+                if isinstance(val, str) and (val.startswith("eyJ") or len(val) > 20):
+                    return val.strip()
+                elif isinstance(val, dict):
+                    t = find_token(val)
+                    if t:
+                        return t
+        for k, v in obj.items():
+            if isinstance(v, str) and (v.startswith("eyJ") or (len(v) > 24 and " " not in v and not v.startswith("http"))):
+                return v.strip()
+            elif isinstance(v, (dict, list)):
+                t = find_token(v)
+                if t:
+                    return t
+    elif isinstance(obj, list):
+        for item in obj:
+            t = find_token(item)
+            if t:
+                return t
+    return None
+
+
 def fetch_user_courses(token: str):
     """Try multiple header configurations and endpoints to discover active courses/batches."""
     header_variants = [
@@ -222,28 +255,34 @@ async def classplus_txt(app, message):
                 return
 
             session_id = None
-            if otp_response.status_code == 200 and isinstance(otp_data, dict) and otp_data.get("status") == "success":
-                session_id = otp_data.get('data', {}).get('sessionId')
-            else:
+            if isinstance(otp_data, dict):
+                session_id = otp_data.get('data', {}).get('sessionId') if isinstance(otp_data.get('data'), dict) else None
+
+            if not session_id:
                 # Fallback: try with org_name if different
                 if org_name and org_name != org_code:
                     otp_payload['orgCode'] = org_name
                     try:
                         otp_response = s.post(f"{apiurl}/v2/otp/generate", json=otp_payload, headers=headers, timeout=15)
                         otp_data = otp_response.json()
-                        if otp_response.status_code == 200 and isinstance(otp_data, dict) and otp_data.get("status") == "success":
-                            session_id = otp_data.get('data', {}).get('sessionId')
+                        if isinstance(otp_data, dict):
+                            session_id = otp_data.get('data', {}).get('sessionId') if isinstance(otp_data.get('data'), dict) else None
                     except Exception:
                         pass
 
             if not session_id:
-                err_reason = otp_data.get("message", "Could not send OTP") if isinstance(otp_data, dict) else str(otp_response.text)
+                raw_reason = otp_data.get("message", "Could not send OTP") if isinstance(otp_data, dict) else str(otp_response.text)
+                err_reason = raw_reason
+                lower_reason = raw_reason.lower()
+                if any(k in lower_reason for k in ["limit", "wait", "many", "cooldown", "exceeded", "seconds", "minute", "time"]):
+                    err_reason = f"{raw_reason}\n\n⏳ <b>क्लासप्लस ने इस नंबर पर अस्थायी रोक (Rate Limit / Cooldown) लगाई है।</b>\nकृपया 1 से 2 मिनट रुककर दोबारा प्रयास करें।"
+
                 await status_msg.edit_text(
                     f"❌ <b>OTP भेजने में समस्या आई!</b>\n\n"
                     f"🏢 <b>Institute:</b> {org_name} (<code>{org_code}</code>)\n"
                     f"📱 <b>Mobile:</b> <code>+91 {mobile}</code>\n"
                     f"⚠️ <b>कारण:</b> {err_reason}\n\n"
-                    "कृपया नंबर और ORG कोड जांचें या कुछ देर बाद दोबारा प्रयास करें।"
+                    "कृपया 1-2 मिनट बाद पुनः प्रयास करें।"
                 )
                 return
 
@@ -294,12 +333,12 @@ async def classplus_txt(app, message):
             except Exception:
                 pass
 
-            token = None
-            if verify_response.status_code == 200 and verify_data.get('status') == 'success':
-                token = verify_data.get('data', {}).get('token')
-            elif verify_response.status_code in [201, 409]:
-                # User registration required
-                email = str(uuid.uuid4()).replace('-', '')[:16] + "@gmail.com"
+            # First: Extract token directly from verify response or response headers
+            token = find_token(verify_data) or verify_response.headers.get('x-access-token')
+
+            # Second: If token is not present and verify succeeded or registration is needed (e.g. 200, 201, 409)
+            if not token and (verify_response.status_code in [200, 201, 409] or verify_data.get("message") == "Verify successful"):
+                email = str(uuid.uuid4()).replace('-', '') + "@gmail.com"
                 reg_payload = {
                     "contact": {
                         "email": email,
@@ -307,7 +346,7 @@ async def classplus_txt(app, message):
                         "mobile": mobile
                     },
                     "fingerprintId": fingerprint_id,
-                    "name": "User",
+                    "name": "name",
                     "orgId": org_id,
                     "orgName": org_name,
                     "otp": clean_otp,
@@ -316,13 +355,21 @@ async def classplus_txt(app, message):
                     "viaEmail": 0,
                     "viaSms": 1
                 }
-                reg_response = s.post(f"{apiurl}/v2/users/register", json=reg_payload, headers=headers, timeout=15)
                 try:
+                    reg_response = s.post(f"{apiurl}/v2/users/register", json=reg_payload, headers=headers, timeout=15)
                     reg_data = reg_response.json()
-                    if reg_response.status_code == 200 and reg_data.get('status') == 'success':
-                        token = reg_data.get('data', {}).get('token')
+                    token = find_token(reg_data) or reg_response.headers.get('x-access-token')
                 except Exception:
                     pass
+
+                if not token and org_name != org_code:
+                    reg_payload["orgName"] = org_code
+                    try:
+                        reg_response = s.post(f"{apiurl}/v2/users/register", json=reg_payload, headers=headers, timeout=15)
+                        reg_data = reg_response.json()
+                        token = find_token(reg_data) or reg_response.headers.get('x-access-token')
+                    except Exception:
+                        pass
 
             if token:
                 s.headers['x-access-token'] = token
@@ -350,7 +397,11 @@ async def classplus_txt(app, message):
                 else:
                     await message.reply_text("⚠️ <b>लॉगिन सफल रहा</b>, लेकिन इस अकाउंट में कोई एक्टिव कोर्स/बैच नहीं मिला।")
             else:
-                err_msg = verify_data.get("message", "Invalid OTP or login failed") if isinstance(verify_data, dict) else "Wrong OTP"
+                raw_err = verify_data.get("message", "Invalid OTP or login failed") if isinstance(verify_data, dict) else "Wrong OTP"
+                if raw_err == "Verify successful":
+                    err_msg = "OTP सत्यापित हुआ लेकिन क्लासप्लस सर्वर से ऑथराइजेशन टोकन प्राप्त नहीं हो सका। कृपया पुनः प्रयास करें।"
+                else:
+                    err_msg = raw_err
                 await message.reply_text(f"❌ <b>लॉगिन असफल:</b> {err_msg}")
 
         except Exception as e:

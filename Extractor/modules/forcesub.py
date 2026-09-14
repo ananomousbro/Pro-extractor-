@@ -1,5 +1,6 @@
 import time
 import asyncio
+import logging
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
 from pyrogram.errors import UserNotParticipant
@@ -7,14 +8,31 @@ from Extractor import app
 from config import ADMINS, OWNER_ID, FSUB_CHANNELS
 
 # Cache to store verified users: {user_id: expire_timestamp}
-# This prevents flooding Telegram API on every single button press or message
 _verified_cache = {}
 CACHE_TTL = 90  # 90 seconds cache
+
+# Cache resolved chat IDs: {username: chat_id}
+_resolved_chats = {}
+
+JOINED_STATUSES = {"member", "administrator", "owner", "creator", "restricted"}
 
 def is_admin(user_id: int) -> bool:
     if not user_id:
         return False
     return user_id == OWNER_ID or user_id in ADMINS
+
+async def get_chat_id(client, username_or_id):
+    if username_or_id in _resolved_chats:
+        return _resolved_chats[username_or_id]
+    
+    target = f"@{str(username_or_id).lstrip('@')}" if isinstance(username_or_id, str) and not username_or_id.startswith("-100") else username_or_id
+    try:
+        chat = await client.get_chat(target)
+        _resolved_chats[username_or_id] = chat.id
+        return chat.id
+    except Exception as e:
+        logging.warning(f"[ForceSub] Could not get_chat for {target}: {e}")
+        return target
 
 async def get_missing_channels(client, user_id: int):
     if is_admin(user_id):
@@ -27,16 +45,21 @@ async def get_missing_channels(client, user_id: int):
     missing = []
     for ch in FSUB_CHANNELS:
         try:
-            member = await client.get_chat_member(ch["username"], user_id)
-            if member.status in ["kicked", "banned"]:
-                missing.append(ch)
-            elif member.status not in ["creator", "administrator", "member", "restricted"]:
+            target = await get_chat_id(client, ch["username"])
+            member = await client.get_chat_member(target, user_id)
+            
+            # Extract string status safely (supports both Pyrogram v1 string and Pyrogram v2 Enum)
+            status_val = str(getattr(member.status, "value", member.status)).lower()
+            
+            if status_val not in JOINED_STATUSES:
                 missing.append(ch)
         except UserNotParticipant:
             missing.append(ch)
         except Exception as e:
-            # If temporary network issue or peer resolution error, log without falsely blocking
-            print(f"[ForceSub] Notice checking {ch['username']} for {user_id}: {e}")
+            err_name = type(e).__name__
+            logging.info(f"[ForceSub] Status check for {ch['username']} (User: {user_id}): {err_name} - {e}")
+            if "UserNotParticipant" in err_name:
+                missing.append(ch)
 
     if not missing:
         _verified_cache[user_id] = now + CACHE_TTL
@@ -71,7 +94,7 @@ async def forcesub_message_handler(client, message: Message):
     if is_admin(user_id):
         return
 
-    # If user is in an active ask() prompt, don't interrupt non-command input
+    # If user is in an active ask() prompt, don't interrupt regular text inputs (e.g. OTP/phone)
     listening_chats = getattr(client, "listening", {})
     if (message.chat.id in listening_chats or user_id in listening_chats) and not (message.text and message.text.startswith("/")):
         return
@@ -85,7 +108,7 @@ async def forcesub_message_handler(client, message: Message):
                 disable_web_page_preview=True
             )
         except Exception as e:
-            print(f"[ForceSub] Send message error: {e}")
+            logging.error(f"[ForceSub] Send message error: {e}")
         message.stop_propagation()
 
 # Group -1 runs BEFORE all normal callback query handlers (group 0)

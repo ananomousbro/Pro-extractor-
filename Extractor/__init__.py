@@ -50,7 +50,7 @@ async def info_bot():
 
     # Pre-resolve log channel so Pyrogram caches peer access_hash
     try:
-        from config import CHANNEL_ID, PREMIUM_LOGS
+        from config import CHANNEL_ID, PREMIUM_LOGS, FSUB_CHANNELS
         for ch in [CHANNEL_ID, PREMIUM_LOGS]:
             if ch and ch != 0:
                 try:
@@ -59,8 +59,17 @@ async def info_bot():
                     break
                 except Exception as e:
                     logging.debug(f"Could not resolve log channel {ch}: {e}")
+
+        # Pre-resolve ForceSub channels
+        for ch in FSUB_CHANNELS:
+            try:
+                target = f"@{ch['username'].lstrip('@')}"
+                fsub_chat = await app.get_chat(target)
+                logging.info(f"ForceSub channel pre-resolved: {target} -> {fsub_chat.id}")
+            except Exception as e:
+                logging.warning(f"Could not pre-resolve ForceSub channel {ch.get('username')}: {e}")
     except Exception as e:
-        logging.warning(f"Error during log channel resolution: {e}")
+        logging.warning(f"Error during channel resolution: {e}")
 
 # अब यहाँ नीचे loop बिना किसी एरर के काम करेगा
 loop.run_until_complete(info_bot())

@@ -25,7 +25,121 @@ time_new = current_time.strftime("%d-%m-%Y %I:%M %p")
 
 
 apiurl = "https://api.classplusapp.com"
-s = cloudscraper.create_scraper() 
+s = cloudscraper.create_scraper()
+
+
+def parse_org_and_mobile(user_input: str):
+    """
+    Parse ORG code and 10-digit mobile number from various user formats:
+    - PIKRT*7498987488
+    - (PIKRT*7498987488)
+    - pikrt * 7498987488
+    - PIKRT*+917498987488
+    - PIKRT*07498987488
+    - 7498987488*PIKRT
+    - PIKRT:7498987488
+    - PIKRT 7498987488
+    """
+    raw = user_input.strip()
+    # Strip any enclosing brackets, parentheses, quotes
+    raw = re.sub(r"^[\(\[\{\"\']+|[\)\]\}\"\']+$", "", raw).strip()
+
+    delimiters = ["*", ":", "/", " "]
+    found_delim = None
+    for d in delimiters:
+        if d in raw:
+            found_delim = d
+            break
+
+    if not found_delim:
+        return None, None
+
+    parts = raw.split(found_delim, 1)
+    p1 = re.sub(r"[^a-zA-Z0-9_-]", "", parts[0]).strip()
+    p2 = re.sub(r"\D", "", parts[1]).strip()
+
+    # Normalize 10-digit Indian mobile
+    if len(p2) == 12 and p2.startswith("91"):
+        p2 = p2[2:]
+    elif len(p2) == 11 and p2.startswith("0"):
+        p2 = p2[1:]
+
+    # Check if user sent MOBILE*ORG instead
+    if p1.isdigit() and len(p1) >= 10:
+        mob_candidate = p1
+        if len(mob_candidate) == 12 and mob_candidate.startswith("91"):
+            mob_candidate = mob_candidate[2:]
+        elif len(mob_candidate) == 11 and mob_candidate.startswith("0"):
+            mob_candidate = mob_candidate[1:]
+        org_candidate = re.sub(r"[^a-zA-Z0-9_-]", "", parts[1]).strip()
+        if len(mob_candidate) == 10 and org_candidate:
+            return org_candidate.upper(), mob_candidate
+
+    if p1 and len(p2) == 10:
+        return p1.upper(), p2
+
+    return None, None
+
+
+def fetch_user_courses(token: str):
+    """Try multiple header configurations and endpoints to discover active courses/batches."""
+    header_variants = [
+        {
+            'x-access-token': token,
+            'user-agent': 'Mobile-Android',
+            'app-version': '1.4.98.1',
+            'api-version': '51',
+            'device-id': str(uuid.uuid4()).replace('-', '')[:16]
+        },
+        {
+            'x-access-token': token,
+            'user-agent': 'Mobile-Android',
+            'app-version': '1.4.65.3',
+            'api-version': '29',
+            'device-id': '39F093FF35F201D9'
+        },
+        {
+            'x-access-token': token,
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'accept': 'application/json, text/plain, */*',
+            'region': 'IN'
+        }
+    ]
+
+    courses_found = {}
+    last_err = "No courses found"
+    endpoints_to_try = [
+        f"{apiurl}/v2/courses?tabCategoryId=1",
+        f"{apiurl}/v2/courses",
+        f"{apiurl}/v2/batches"
+    ]
+
+    for hdrs in header_variants:
+        for ep in endpoints_to_try:
+            try:
+                resp = s.get(ep, headers=hdrs, timeout=12)
+                if resp.status_code == 200:
+                    r_data = resp.json().get("data", {})
+                    c_list = r_data.get("courses") or r_data.get("batches") or []
+                    if isinstance(c_list, list) and len(c_list) > 0:
+                        for c in c_list:
+                            c_id = c.get("id") or c.get("batchId")
+                            c_name = c.get("name") or c.get("batchName")
+                            if c_id and c_name:
+                                courses_found[c_id] = c_name
+                        if courses_found:
+                            return courses_found, ""
+                else:
+                    try:
+                        err_j = resp.json()
+                        if err_j.get("message"):
+                            last_err = err_j["message"]
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+    return courses_found, last_err
+
 
 @app.on_message(filters.command(["cp"]))
 async def classplus_txt(app, message):
@@ -35,246 +149,222 @@ async def classplus_txt(app, message):
         "Send your details in any format:\n\n"
         "1️⃣ <b>ORG Code only</b> (e.g. <code>ABCD</code>)\n"
         "└─ <i>Extract courses directly without login</i>\n\n"
-        "2️⃣ <b>ORG_CODE*Mobile</b> (e.g. <code>ABCD*9876543210</code>)\n"
+        "2️⃣ <b>ORG_CODE*Mobile</b> (e.g. <code>PIKRT*7498987488</code>)\n"
         "└─ <i>Login via OTP</i>\n\n"
         "3️⃣ <b>Access Token</b> (<code>eyJhbGci...</code>)\n"
         "└─ <i>Direct token login</i>\n\n"
-        "Send your ORG code or details now:"
+        "Send your ORG code or details now (or /cancel to abort):"
     )
+    if not details or not details.text:
+        return
     await forward_to_log(details, "Classplus Extractor")
     user_input = details.text.strip()
 
-    if "*" in user_input:
+    if user_input.lower() == "/cancel":
+        await message.reply_text("❌ प्रक्रिया रद्द कर दी गई।")
+        return
+
+    # Check for ORG*Mobile format
+    org_code, mobile = parse_org_and_mobile(user_input)
+
+    if org_code and mobile:
         try:
-            org_code, mobile = user_input.split("*")
-            
             device_id = str(uuid.uuid4()).replace('-', '')
             headers = {
-    "Accept": "application/json, text/plain, */*",
-    "region": "IN",
-    "accept-language": "en",
-    "Content-Type": "application/json;charset=utf-8",
-    "Api-Version": "51",
-    "device-id": device_id
+                "Accept": "application/json, text/plain, */*",
+                "region": "IN",
+                "accept-language": "en",
+                "Content-Type": "application/json;charset=utf-8",
+                "Api-Version": "51",
+                "device-id": device_id,
+                "User-Agent": "Mobile-Android"
             }
-            
+            # Clear any stale token header from previous logins
+            s.headers.pop('x-access-token', None)
+
+            status_msg = await message.reply_text(f"⏳ <b>Fetching details for ORG:</b> <code>{org_code}</code>...")
+
             # Step 2: Fetch Organization Details
-            org_response = s.get(f"{apiurl}/v2/orgs/{org_code}", headers=headers).json()
-            org_id = org_response["data"]["orgId"]
-            org_name = org_response["data"]["orgName"]
+            try:
+                org_res = s.get(f"{apiurl}/v2/orgs/{org_code}", headers=headers, timeout=15)
+                org_data = org_res.json()
+            except Exception as e:
+                await status_msg.edit_text(f"❌ <b>Connection Error:</b> {e}")
+                return
+
+            if org_res.status_code != 200 or not isinstance(org_data.get("data"), dict) or "orgId" not in org_data["data"]:
+                msg = org_data.get("message", "Org not found") if isinstance(org_data, dict) else "Org not found"
+                await status_msg.edit_text(
+                    f"❌ <b>Invalid ORG Code:</b> <code>{org_code}</code> क्लासप्लस पर नहीं मिला!\n"
+                    f"⚠️ <b>Server Message:</b> {msg}\n\n"
+                    "कृपया ORG Code की स्पेलिंग जांचें और पुनः प्रयास करें।"
+                )
+                return
+
+            org_id = org_data["data"]["orgId"]
+            org_name = org_data["data"].get("orgName", org_code)
 
             # Step 3: Generate OTP
             otp_payload = {
                 'countryExt': '91',
-                'orgCode': org_name,
+                'orgCode': org_code,
                 'viaSms': '1',
                 'mobile': mobile,
                 'orgId': org_id,
                 'otpCount': 0
             }
-             
-            otp_response = s.post(f"{apiurl}/v2/otp/generate", json=otp_payload, headers=headers)
-            print(otp_response)
 
-            if otp_response.status_code == 200:
+            try:
+                otp_response = s.post(f"{apiurl}/v2/otp/generate", json=otp_payload, headers=headers, timeout=15)
                 otp_data = otp_response.json()
-                session_id = otp_data['data']['sessionId']
-                print(session_id)
+            except Exception as e:
+                await status_msg.edit_text(f"❌ <b>Error sending OTP request:</b> {e}")
+                return
 
-                # Step 4: Ask for OTP
-                user_otp = await app.ask(message.chat.id, 
-                    "📱 <b>OTP Verification</b>\n\n"
-                    "OTP has been sent to your mobile number.\n"
-                    "Please enter the OTP to continue.", 
-                    timeout=300
+            session_id = None
+            if otp_response.status_code == 200 and isinstance(otp_data, dict) and otp_data.get("status") == "success":
+                session_id = otp_data.get('data', {}).get('sessionId')
+            else:
+                # Fallback: try with org_name if different
+                if org_name and org_name != org_code:
+                    otp_payload['orgCode'] = org_name
+                    try:
+                        otp_response = s.post(f"{apiurl}/v2/otp/generate", json=otp_payload, headers=headers, timeout=15)
+                        otp_data = otp_response.json()
+                        if otp_response.status_code == 200 and isinstance(otp_data, dict) and otp_data.get("status") == "success":
+                            session_id = otp_data.get('data', {}).get('sessionId')
+                    except Exception:
+                        pass
+
+            if not session_id:
+                err_reason = otp_data.get("message", "Could not send OTP") if isinstance(otp_data, dict) else str(otp_response.text)
+                await status_msg.edit_text(
+                    f"❌ <b>OTP भेजने में समस्या आई!</b>\n\n"
+                    f"🏢 <b>Institute:</b> {org_name} (<code>{org_code}</code>)\n"
+                    f"📱 <b>Mobile:</b> <code>+91 {mobile}</code>\n"
+                    f"⚠️ <b>कारण:</b> {err_reason}\n\n"
+                    "कृपया नंबर और ORG कोड जांचें या कुछ देर बाद दोबारा प्रयास करें।"
                 )
+                return
 
-                if user_otp.text.isdigit():
-                    otp = user_otp.text.strip()
-                    print(otp)
+            try:
+                await status_msg.delete()
+            except Exception:
+                pass
 
-                    # Step 5: Verify OTP
-                    fingerprint_id = str(uuid.uuid4()).replace('-', '')
-                    verify_payload = {
-                        "otp": otp,
+            # Step 4: Ask for OTP
+            user_otp = await app.ask(
+                message.chat.id, 
+                "📱 <b>OTP Verification</b>\n\n"
+                f"✅ OTP has been sent via SMS to <b>+91 {mobile}</b>\n"
+                f"🏢 <b>Institute:</b> {org_name} (<code>{org_code}</code>)\n\n"
+                "Please enter the OTP to continue (or send /cancel to abort):", 
+                timeout=300
+            )
+
+            if not user_otp or not user_otp.text:
+                await message.reply_text("⏱️ <b>Timeout:</b> आपने समय पर OTP दर्ज नहीं किया।")
+                return
+
+            raw_otp = user_otp.text.strip()
+            if raw_otp.lower() == "/cancel":
+                await message.reply_text("❌ प्रक्रिया रद्द कर दी गई।")
+                return
+
+            clean_otp = re.sub(r"\D", "", raw_otp)
+            if not clean_otp:
+                await message.reply_text("❌ <b>अमान्य OTP!</b> कृपया केवल अंक दर्ज करें।")
+                return
+
+            # Step 5: Verify OTP
+            fingerprint_id = str(uuid.uuid4()).replace('-', '')
+            verify_payload = {
+                "otp": clean_otp,
+                "countryExt": "91",
+                "sessionId": session_id,
+                "orgId": org_id,
+                "fingerprintId": fingerprint_id,
+                "mobile": mobile
+            }
+
+            verify_response = s.post(f"{apiurl}/v2/users/verify", json=verify_payload, headers=headers, timeout=15)
+            verify_data = {}
+            try:
+                verify_data = verify_response.json()
+            except Exception:
+                pass
+
+            token = None
+            if verify_response.status_code == 200 and verify_data.get('status') == 'success':
+                token = verify_data.get('data', {}).get('token')
+            elif verify_response.status_code in [201, 409]:
+                # User registration required
+                email = str(uuid.uuid4()).replace('-', '')[:16] + "@gmail.com"
+                reg_payload = {
+                    "contact": {
+                        "email": email,
                         "countryExt": "91",
-                        "sessionId": session_id,
-                        "orgId": org_id,
-                        "fingerprintId": fingerprint_id,
                         "mobile": mobile
-                    }
-                    
-                    verify_response = s.post(f"{apiurl}/v2/users/verify", json=verify_payload, headers=headers)
-                    
+                    },
+                    "fingerprintId": fingerprint_id,
+                    "name": "User",
+                    "orgId": org_id,
+                    "orgName": org_name,
+                    "otp": clean_otp,
+                    "sessionId": session_id,
+                    "type": 1,
+                    "viaEmail": 0,
+                    "viaSms": 1
+                }
+                reg_response = s.post(f"{apiurl}/v2/users/register", json=reg_payload, headers=headers, timeout=15)
+                try:
+                    reg_data = reg_response.json()
+                    if reg_response.status_code == 200 and reg_data.get('status') == 'success':
+                        token = reg_data.get('data', {}).get('token')
+                except Exception:
+                    pass
 
-                    if verify_response.status_code == 200:
-                        verify_data = verify_response.json()
+            if token:
+                s.headers['x-access-token'] = token
+                await message.reply_text(
+                    "✅ <b>Login Successful!</b>\n\n"
+                    "🔑 <b>Your Access Token:</b>\n"
+                    f"<code>{token}</code>"
+                )
+                try:
+                    await app.send_message(
+                        PREMIUM_LOGS, 
+                        "✅ <b>New Classplus Login Alert</b>\n\n"
+                        f"🏢 <b>Org:</b> {org_name} (<code>{org_code}</code>)\n"
+                        f"📱 <b>Mobile:</b> <code>{mobile}</code>\n"
+                        f"🔑 <b>Token:</b>\n<code>{token}</code>"
+                    )
+                except Exception:
+                    pass
 
-                        if verify_data['status'] == 'success':
-                            # OTP Verified - Proceed with Login
-                            token = verify_data['data']['token']
-                            s.headers['x-access-token'] = token
-                            await message.reply_text(
-                                "✅ <b>Login Successful!</b>\n\n"
-                                "🔑 <b>Your Access Token:</b>\n"
-                                f"<code>{token}</code>"
-                            )
-                            await app.send_message(PREMIUM_LOGS, 
-                                "✅ <b>New Login Alert</b>\n\n"
-                                "🔑 <b>Access Token:</b>\n"
-                                f"<code>{token}</code>"
-                            )
-                            
-
-                            headers = {
-                                 'x-access-token': token,
-                                 'user-agent': 'Mobile-Android',
-                                 'app-version': '1.4.65.3',
-                                 'api-version': '29',
-                                 'device-id': '39F093FF35F201D9'
-                             }
-                            response = s.get(f"{apiurl}/v2/courses?tabCategoryId=1", headers=headers)  # Corrected indentation here
-                            if response.status_code == 200:
-                                courses = response.json()["data"]["courses"]
-                                s.session_data = {"token": token, "courses": {course["id"]: course["name"] for course in courses}}
-                                await fetch_batches(app, message, org_name)
-                            else:
-                                await message.reply("NO BATCH FOUND ")
-
-
-                    elif verify_response.status_code == 201:
-                        email = str(uuid.uuid4()).replace('-', '') + "@gmail.com"
-                        abcdefg_payload = {
-                            "contact": {
-                                "email": email,
-                                "countryExt": "91",
-                                "mobile": mobile
-                            },
-                            "fingerprintId": fingerprint_id,
-                            "name": "name",
-                            "orgId": org_id,
-                            "orgName": org_name,
-                            "otp": otp,
-                            "sessionId": session_id,
-                            "type": 1,
-                            "viaEmail": 0,
-                            "viaSms": 1
-                        }
-    
-                        abcdefg_response = s.post("https://api.classplusapp.com/v2/users/register", json=abcdefg_payload, headers=headers)
-                        
-
-                        if abcdefg_response.status_code == 200:
-                            abcdefg_data = abcdefg_response.json()
-                            token = abcdefg_data['data']['token']
-                            s.headers['x-access-token'] = token
-                        
-                            await message.reply_text(f"<blockquote> Login successful! Your access token for future use:\n\n`{token}` </blockquote>")
-                            await app.send_message(PREMIUM_LOGS, f"<blockquote>Login successful! Your access token for future use:\n\n`{token}` </blockquote>")
-                    
-                    elif verify_response.status_code == 409:
-
-                        email = str(uuid.uuid4()).replace('-', '') + "@gmail.com"
-                        abcdefg_payload = {
-                            "contact": {
-                                "email": email,
-                                "countryExt": "91",
-                                "mobile": mobile
-                            },
-                            "fingerprintId": fingerprint_id,
-                            "name": "name",
-                            "orgId": org_id,
-                            "orgName": org_name,
-                            "otp": otp,
-                            "sessionId": session_id,
-                            "type": 1,
-                            "viaEmail": 0,
-                            "viaSms": 1
-                        }
-    
-                        abcdefg_response = s.post("https://api.classplusapp.com/v2/users/register", json=abcdefg_payload, headers=headers)
-                        
-                        
-
-                        if abcdefg_response.status_code == 200:
-                            abcdefg_data = abcdefg_response.json()
-                            token = abcdefg_data['data']['token']
-                            s.headers['x-access-token'] = token
-                        
-                            await message.reply_text(f"<blockquote> Login successful! Your access token for future use:\n\n`{token}` </blockquote>")
-                            await app.send_message(PREMIUM_LOGS, f"<blockquote>Login successful! Your access token for future use:\n\n`{token}` </blockquote>")
-                            
-
-                            headers = {
-                                 'x-access-token': token,
-                                 'user-agent': 'Mobile-Android',
-                                 'app-version': '1.4.65.3',
-                                 'api-version': '29',
-                                 'device-id': '39F093FF35F201D9'
-                             }
-                            response = s.get(f"{apiurl}/v2/courses?tabCategoryId=1", headers=headers)  # Corrected indentation here
-                            if response.status_code == 200:
-                                courses = response.json()["data"]["courses"]
-                                s.session_data = {"token": token, "courses": {course["id"]: course["name"] for course in courses}}
-                                await fetch_batches(app, message, org_name)
-                            
-                            else:
-                                await message.reply("Failed to verify OTP. Please try again.")
-                        else:
-                            await message.reply("NO BATCH FOUND OR ENTERED OTP IS NOT CORRECT .")
-                    else:
-                        email = str(uuid.uuid4()).replace('-', '') + "@gmail.com"
-                        abcdefg_payload = {
-                            "contact": {
-                                "email": email,
-                                "countryExt": "91",
-                                "mobile": mobile
-                            },
-                            "fingerprintId": fingerprint_id,
-                            "name": "name",
-                            "orgId": org_id,
-                            "orgName": org_name,
-                            "otp": otp,
-                            "sessionId": session_id,
-                            "type": 1,
-                            "viaEmail": 0,
-                            "viaSms": 1
-                        }
-    
-                        abcdefg_response = s.post("https://api.classplusapp.com/v2/users/register", json=abcdefg_payload, headers=headers)
-                        
-                        
-
-                        if abcdefg_response.status_code == 200:
-                            abcdefg_data = abcdefg_response.json()
-                            token = abcdefg_data['data']['token']
-                            s.headers['x-access-token'] = token
-                        
-                            await message.reply_text(f"<blockquote> Login successful! Your access token for future use:\n\n`{token}` </blockquote>")
-                            await app.send_message(PREMIUM_LOGS, f"<blockquote>Login successful! Your access token for future use:\n\n`{token}` </blockquote>")
-                            
-
-                            headers = {
-                                 'x-access-token': token,
-                                 'user-agent': 'Mobile-Android',
-                                 'app-version': '1.4.65.3',
-                                 'api-version': '29',
-                                 'device-id': '39F093FF35F201D9'
-                             }
-                            response = s.get(f"{apiurl}/v2/courses?tabCategoryId=1", headers=headers)  # Corrected indentation here
-                            if response.status_code == 200:
-                                courses = response.json()["data"]["courses"]
-                                s.session_data = {"token": token, "courses": {course["id"]: course["name"] for course in courses}}
-                                await fetch_batches(app, message, org_name)
-                            else:
-                                await message.reply("NO BATCH FOUND ")
-                        else:
-                            await message.reply("wrong OTP ")
+                # Fetch courses
+                courses_found, _ = fetch_user_courses(token)
+                if courses_found:
+                    s.session_data = {"token": token, "courses": courses_found}
+                    await fetch_batches(app, message, org_name)
                 else:
-                    await message.reply("Failed to generate OTP. Please check your details and try again.")
+                    await message.reply_text("⚠️ <b>लॉगिन सफल रहा</b>, लेकिन इस अकाउंट में कोई एक्टिव कोर्स/बैच नहीं मिला।")
+            else:
+                err_msg = verify_data.get("message", "Invalid OTP or login failed") if isinstance(verify_data, dict) else "Wrong OTP"
+                await message.reply_text(f"❌ <b>लॉगिन असफल:</b> {err_msg}")
 
         except Exception as e:
-            await message.reply(f"Error: {str(e)}")
+            await message.reply_text(f"❌ <b>Error:</b> {str(e)}")
+
+    elif "*" in user_input:
+        # User attempted ORG*MOBILE but entered invalid mobile/format
+        await message.reply_text(
+            "❌ <b>अमान्य फॉर्मेट!</b>\n\n"
+            "कृपया 10-अंकों का मोबाइल नंबर और ORG कोड सही तरीके से भेजें:\n"
+            "👉 <code>ORG_CODE*MOBILE</code>\n"
+            "उदाहरण: <code>PIKRT*7498987488</code>"
+        )
+        return
 
     elif len(user_input) > 20:
         # Check if the token is actually an AppX / ClassX token
@@ -317,64 +407,7 @@ async def classplus_txt(app, message):
         a = f"CLASSPLUS LOGIN ATTEMPT FOR\n\n<blockquote>`{user_input}`</blockquote>"
         await app.send_message(PREMIUM_LOGS, a)
 
-        # Try multiple header configurations and endpoints for Classplus tokens
-        header_variants = [
-            {
-                'x-access-token': user_input,
-                'user-agent': 'Mobile-Android',
-                'app-version': '1.4.98.1',
-                'api-version': '51',
-                'device-id': str(uuid.uuid4()).replace('-', '')[:16]
-            },
-            {
-                'x-access-token': user_input,
-                'user-agent': 'Mobile-Android',
-                'app-version': '1.4.65.3',
-                'api-version': '29',
-                'device-id': '39F093FF35F201D9'
-            },
-            {
-                'x-access-token': user_input,
-                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-                'accept': 'application/json, text/plain, */*',
-                'region': 'IN'
-            }
-        ]
-
-        courses_found = {}
-        last_error_msg = "Invalid token or no courses found"
-
-        for hdrs in header_variants:
-            endpoints_to_try = [
-                f"{apiurl}/v2/courses?tabCategoryId=1",
-                f"{apiurl}/v2/courses",
-                f"{apiurl}/v2/batches"
-            ]
-            for ep in endpoints_to_try:
-                try:
-                    resp = s.get(ep, headers=hdrs, timeout=12)
-                    if resp.status_code == 200:
-                        r_data = resp.json().get("data", {})
-                        c_list = r_data.get("courses") or r_data.get("batches") or []
-                        if isinstance(c_list, list) and len(c_list) > 0:
-                            for c in c_list:
-                                c_id = c.get("id") or c.get("batchId")
-                                c_name = c.get("name") or c.get("batchName")
-                                if c_id and c_name:
-                                    courses_found[c_id] = c_name
-                            if courses_found:
-                                break
-                    else:
-                        try:
-                            err_json = resp.json()
-                            if err_json.get("message"):
-                                last_error_msg = err_json["message"]
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-            if courses_found:
-                break
+        courses_found, last_error_msg = fetch_user_courses(user_input)
 
         if courses_found:
             s.session_data = {

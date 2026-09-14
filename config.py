@@ -22,6 +22,10 @@ CHANNEL_ID = int(os.environ.get("CHANNEL_ID", "-1003716177168"))
 
 # //FORCE_CHANNEL_ID
 CHANNEL_ID2 = int(os.environ.get("CHANNEL_ID2", "0")) 
+FSUB_CHANNELS = [
+    {"name": "📢 Main Channel", "username": "nikbotchannel", "url": "https://t.me/nikbotchannel"},
+    {"name": "💬 Support Group", "username": "niksupportgroup", "url": "https://t.me/niksupportgroup"}
+]
 # ------------------------------------------------
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://sofisnyder536_db_user:qADieTbcEahcRj39@cluster0.7wyviws.mongodb.net")
 # -----------------------------------------------

@@ -107,10 +107,7 @@ buttons = InlineKeyboardMarkup([
         InlineKeyboardButton("🔭 VISION IAS 🔭", callback_data="vision_ias_")
     ],
     [
-        InlineKeyboardButton("🏔 EVEREST IMPACT 🏔", callback_data="everest_impact"),
-        InlineKeyboardButton("🛡 RG VIKRAMJEET 🛡", callback_data="rgvikramjeet_")
-    ],
-    [
+        InlineKeyboardButton("🛡 RG VIKRAMJEET 🛡", callback_data="rgvikramjeet_"),
         InlineKeyboardButton("🔒 NO LOGIN APPS 🔒", callback_data="custom_")
     ],
     [
@@ -187,6 +184,7 @@ button1 = [
                     InlineKeyboardButton("👑 Eᴠᴇʀᴇsᴛ Iᴍᴘᴀᴄᴛ", callback_data="everest_impact")
                 ],
                 [
+                    InlineKeyboardButton("👑 Vɪᴅʏᴀɢʀᴀᴍ", callback_data="vidyagram_"),
                     InlineKeyboardButton("👑 Rᴀɴᴋᴇʀs Gᴜʀᴜᴋᴜʟ", callback_data="maintainer_")
                 ],
                 [
@@ -442,12 +440,19 @@ async def help_cmd(client, message):
         "• /start - मेनू और ऐप्स लिस्ट देखें\n"
         "• /myplan - अपना एक्टिव प्रीमियम प्लान देखें\n"
         "• /plans - प्रीमियम प्लान्स और प्राइजिंग देखें\n"
+        "• /vidyagram - Vidyagram (AR Maths) कोर्सेज\n"
         "• /freeappx - Appx कोर्सेज लिस्ट\n"
         "• /freepw - Physics Wallah कोर्सेज\n"
         "• /freecp - Classplus कोर्सेज\n\n"
         f"👑 प्रीमियम एक्सेस लेने या सहायता के लिए एडमिन से संपर्क करें: @{ADMIN_BOT_USERNAME}"
     )
     await message.reply_text(user_help_text, disable_web_page_preview=True)
+
+@app.on_message(filters.command(["vidyagram", "vidyagram_txt"]))
+async def vidyagram_cmd(client, message):
+    api = "armathsapi.akamai.net.in"
+    name = "Vidyagram"
+    await appex_v5_txt(app, message, api, name)
 
 @app.on_callback_query(filters.regex("^appxlist$"))
 async def show_alphabet(client, query):
@@ -895,6 +900,11 @@ async def handle_callback(client, query):
     elif query.data == "everest_impact":
         api = "everestimpactapi.classx.co.in"
         name = "Everest Impact"
+        await appex_v5_txt(app, query.message, api, name) 
+
+    elif query.data == "vidyagram_":
+        api = "armathsapi.akamai.net.in"
+        name = "Vidyagram"
         await appex_v5_txt(app, query.message, api, name) 
 
     elif query.data == "app_exampur":

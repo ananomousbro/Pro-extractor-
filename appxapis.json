@@ -712,6 +712,10 @@
         "api": "https://arexapi.classx.co.in"
     },
     {
+        "name": "Armaths",
+        "api": "https://armathsapi.akamai.net.in"
+    },
+    {
         "name": "Armystudy",
         "api": "https://armystudyliveclassesapi.classx.co.in"
     },
@@ -2634,6 +2638,10 @@
     {
         "name": "Eurekaacademylive",
         "api": "https://eurekaacademyliveapi.classx.co.in"
+    },
+    {
+        "name": "Everest Impact",
+        "api": "https://everestimpactapi.classx.co.in"
     },
     {
         "name": "Everestimpact",
@@ -9318,6 +9326,10 @@
     {
         "name": "Vidyadarpan",
         "api": "https://vidyadarpanapi.classx.co.in"
+    },
+    {
+        "name": "Vidyagram",
+        "api": "https://armathsapi.akamai.net.in"
     },
     {
         "name": "Vidyaguruschoolprep",

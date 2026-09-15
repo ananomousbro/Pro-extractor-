@@ -157,8 +157,13 @@ async def handle_iq_logic(app, m):
             logged_in = True
 
         if logged_in:
+            auth_val = token if token.startswith("Bearer ") else f"Bearer {token}"
             headers = {
-                "Authorization": f"Bearer {token}",
+                "Authorization": auth_val,
+                "Platform": "WEB",
+                "Origin": "https://www.studyiq.com",
+                "Referer": "https://www.studyiq.com/",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36"
             }
             
             # Fetch courses

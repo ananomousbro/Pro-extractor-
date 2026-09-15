@@ -35,6 +35,9 @@ from Extractor.modules.findapi import findapis_extract
 from Extractor.modules.rg_vikramjeet import rgvikramjeet
 from Extractor.modules.adda import adda_command_handler
 from Extractor.modules.vision import scrape_vision_ias
+from Extractor.modules.guidely import guidely_login
+from Extractor.modules.oliveboard import oliveboard_login
+from Extractor.modules.testbook import testbook_handler
 from Extractor.core.utils import forward_to_log
 from Extractor.modules.enc import *
 
@@ -109,6 +112,14 @@ buttons = InlineKeyboardMarkup([
     [
         InlineKeyboardButton("🛡 RG VIKRAMJEET 🛡", callback_data="rgvikramjeet_"),
         InlineKeyboardButton("🔒 NO LOGIN APPS 🔒", callback_data="custom_")
+    ],
+    [
+        InlineKeyboardButton("📖 GUIDELY 📖", callback_data="guidely_"),
+        InlineKeyboardButton("🎯 OLIVEBOARD 🎯", callback_data="oliveboard_")
+    ],
+    [
+        InlineKeyboardButton("📚 TESTBOOK 📚", callback_data="testbook_"),
+        InlineKeyboardButton("👑 STUDY IQ 👑", callback_data="iq_")
     ],
     [
         InlineKeyboardButton("📞 CONTACT ↗", url=f"https://t.me/{ADMIN_BOT_USERNAME}"),
@@ -1017,6 +1028,12 @@ async def handle_callback(client, query):
         await ak_start(app, query.message)
     elif query.data == "exampur_txt":
         await exampur_txt(app, query.message)
+    elif query.data == "guidely_":
+        await guidely_login(app, query.message)
+    elif query.data == "oliveboard_":
+        await oliveboard_login(app, query.message)
+    elif query.data == "testbook_":
+        await testbook_handler(app, query.message)
 
 def get_alphabet_keyboard():
     """Create a keyboard with A-Z buttons in a modern style"""

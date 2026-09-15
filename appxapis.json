@@ -7300,6 +7300,10 @@
         "api": "https://schoolingmantraapi.classx.co.in"
     },
     {
+        "name": "Science Magnet",
+        "api": "https://sciencemagnetapi.classx.co.in"
+    },
+    {
         "name": "Scienceacademy",
         "api": "https://scienceacademyapi.classx.co.in"
     },
@@ -7318,6 +7322,10 @@
     {
         "name": "Sciencefun",
         "api": "https://sciencefunapi.classx.co.in"
+    },
+    {
+        "name": "ScienceMagnet",
+        "api": "https://sciencemagnetapi.classx.co.in"
     },
     {
         "name": "Scienceplus",

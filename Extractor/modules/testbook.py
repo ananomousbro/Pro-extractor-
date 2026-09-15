@@ -50,10 +50,18 @@ async def testbook_handler(client, message):
             await editable.edit_text(f"⏳ मोबाइल नंबर <code>{mobile}</code> पर OTP भेजा जा रहा है...")
 
             otp_send_url = f"https://api.testbook.com/api/v2/otp/send?client=web&emailOrMobile={mobile}"
+            otp_headers = {**headers, "Content-Type": "application/json"}
+            otp_sent_ok = False
             async with aiohttp.ClientSession() as session:
-                async with session.get(otp_send_url, headers=headers) as resp:
+                async with session.post(otp_send_url, json={"emailOrMobile": mobile}, headers=otp_headers) as resp:
                     resp_json = await resp.json(content_type=None)
                     logger.info(f"Testbook OTP send resp: {resp_json}")
+                    if resp_json.get("success"):
+                        otp_sent_ok = True
+                    else:
+                        err_msg = resp_json.get("message", "OTP भेजने में त्रुटि हुई")
+                        await editable.edit_text(f"❌ <b>OTP नहीं भेजा जा सका:</b> {err_msg}")
+                        return
 
             otp_prompt = await app.ask(message.chat.id, f"📲 आपके मोबाइल <code>{mobile}</code> पर प्राप्त 6-अंकों का OTP भेजें:")
             otp_code = otp_prompt.text.strip()

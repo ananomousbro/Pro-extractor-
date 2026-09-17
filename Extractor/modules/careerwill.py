@@ -31,7 +31,8 @@ def generate_cwkey():
         cipher = AES.new(key, AES.MODE_CBC, iv)
         enc = cipher.encrypt(msg)
         return base64.b64encode(enc).decode('utf-8')
-    except Exception:
+    except Exception as e:
+        print(f"Error in generate_cwkey: {e}")
         return "+HwN3zs4tPU0p8BpOG5ZlXIU6MaWQmnMHXMJLLFcJ5m4kWqLXGLpsp8+2ydtILXy"
 
 # Robust API requester that tries web, v10, v9 and handles errors safely
@@ -382,7 +383,7 @@ async def career_will(app: Client, message: Message):
                 "Host": "wbspec.crwilladmin.com",
                 "appver": "1",
                 "apptype": "web",
-                "cwkey": "I6WakWiwTfJ+g/azCL2444bdaTvT7SUzeylfzy4s/vg=",
+                "cwkey": generate_cwkey(),
                 "content-type": "application/json",
                 "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
                 "origin": "https://web.careerwill.com",

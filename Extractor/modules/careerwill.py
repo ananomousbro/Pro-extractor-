@@ -22,7 +22,10 @@ bc_url = f"https://edge.api.brightcove.com/playback/v1/accounts/{ACCOUNT_ID}/vid
 # Helper to generate CareerWill encrypted cwkey
 def generate_cwkey():
     try:
-        from Crypto.Cipher import AES
+        try:
+            from Crypto.Cipher import AES
+        except ImportError:
+            from Cryptodome.Cipher import AES
         key = b'E12K7l97Z7wCo3Gu'
         iv = b'mOk15J2m12qZ2tKI'
         msg = f"{int(time.time()*1000)}||crwillweb@4598".encode('utf-8')
@@ -399,18 +402,45 @@ async def career_will(app: Client, message: Message):
             }
 
             login_success = False
+            last_error = ""
             
             # Try new v1 web login endpoint first
             try:
-                resp = requests.post("https://wbspec.crwilladmin.com/api/v1/login", headers=headers, json=data, timeout=10)
-                if resp.status_code == 200:
-                    res_json = resp.json()
-                    token = res_json.get("data", {}).get("token")
-                    if token:
-                        login_success = True
+                import urllib.request
+                import json
+                req = urllib.request.Request(
+                    "https://wbspec.crwilladmin.com/api/v1/login",
+                    data=json.dumps(data).encode('utf-8'),
+                    headers=headers,
+                    method='POST'
+                )
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    if response.status == 200:
+                        res_json = json.loads(response.read().decode('utf-8'))
+                        token = res_json.get("data", {}).get("token")
+                        if token:
+                            login_success = True
+            except urllib.error.HTTPError as e:
+                err_text = e.read().decode('utf-8')
+                print(f"Urllib web login failed: {e.code} {err_text}")
+                last_error = f"HTTP {e.code}: {err_text[:200]}"
             except Exception as e:
-                print(f"Web login failed: {e}")
+                print(f"Urllib web login exception: {e}")
+                last_error = str(e)
                 
+            if not login_success:
+                try:
+                    resp = requests.post("https://wbspec.crwilladmin.com/api/v1/login", headers=headers, json=data, timeout=10)
+                    if resp.status_code == 200:
+                        res_json = resp.json()
+                        token = res_json.get("data", {}).get("token")
+                        if token:
+                            login_success = True
+                    else:
+                        last_error = f"Requests HTTP {resp.status_code}: {resp.text[:200]}"
+                except Exception as e:
+                    print(f"Requests web login failed: {e}")
+                            
             if not login_success:
                 # Fallback to old android logic
                 headers_fallback = {
@@ -443,7 +473,7 @@ async def career_will(app: Client, message: Message):
                         pass
 
             if not login_success or not token:
-                await message.reply_text("❌ **Login Failed!**\nPlease check your email/mobile and password, or provide a direct session Token.")
+                await message.reply_text(f"❌ **Login Failed!**\nPlease check your email/mobile and password, or provide a direct session Token.\n\nError: `{last_error}`")
                 return
 
             success_msg = (

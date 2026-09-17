@@ -1,0 +1,10 @@
+const crypto = require('crypto');
+const key = Buffer.from('E12K7l97Z7wCo3Gu');
+const iv = Buffer.from('mOk15J2m12qZ2tKI');
+const cwkey_b64 = "I6WakWiwTfJ+g/azCL2444bdaTvT7SUzeylfzy4s/vg=";
+const enc = Buffer.from(cwkey_b64, 'base64');
+const decipher = crypto.createDecipheriv('aes-128-cbc', key, iv);
+decipher.setAutoPadding(false);
+let msg = decipher.update(enc, undefined, 'utf8');
+msg += decipher.final('utf8');
+console.log("Decrypted cwkey:", msg);

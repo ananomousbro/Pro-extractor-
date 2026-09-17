@@ -379,35 +379,67 @@ async def career_will(app: Client, message: Message):
             password = password.strip()
 
             headers = {
-                "Host": "elearn.crwilladmin.com",
-                "appver": "240",
-                "apptype": "android",
-                "cwkey": generate_cwkey(),
-                "content-type": "application/json; charset=UTF-8",
-                "user-agent": "okhttp/5.0.0-alpha.2"
+                "Host": "wbspec.crwilladmin.com",
+                "appver": "1",
+                "apptype": "web",
+                "cwkey": "I6WakWiwTfJ+g/azCL2444bdaTvT7SUzeylfzy4s/vg=",
+                "content-type": "application/json",
+                "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+                "origin": "https://web.careerwill.com",
+                "referer": "https://web.careerwill.com/"
             }
             data = {
-                "deviceType": "android",
-                "password": password,
-                "deviceModel": "Xiaomi M2007J20CI",
-                "deviceVersion": "Q(Android 10.0)",
-                "email": email,
-                "deviceIMEI": "d57adbd8a7b8u9i9",
-                "deviceToken": "fake_device_token"
+                "deviceType": "web",
+                "pwd": password,
+                "deviceModel": "ChromeCDM",
+                "deviceVersion": "152.0.0.0",
+                "userid": email,
+                "deviceIMEI": "d1a5b3b4-d6f7-4998-8cdb-81bb1c3ed6b7-5a487141-e89a-4ad5-9d72-b031b3e80340-07046ee9-9885-4882-8b90-de6904db0dff"
             }
 
             login_success = False
-            for endpoint in ["https://elearn.crwilladmin.com/api/v10/login-other", "https://elearn.crwilladmin.com/api/v9/login-other"]:
-                try:
-                    resp = requests.post(endpoint, headers=headers, json=data, timeout=10)
-                    if resp.status_code == 200:
-                        res_json = resp.json()
-                        token = res_json.get("data", {}).get("token")
-                        if token:
-                            login_success = True
-                            break
-                except Exception:
-                    pass
+            
+            # Try new v1 web login endpoint first
+            try:
+                resp = requests.post("https://wbspec.crwilladmin.com/api/v1/login", headers=headers, json=data, timeout=10)
+                if resp.status_code == 200:
+                    res_json = resp.json()
+                    token = res_json.get("data", {}).get("token")
+                    if token:
+                        login_success = True
+            except Exception as e:
+                print(f"Web login failed: {e}")
+                
+            if not login_success:
+                # Fallback to old android logic
+                headers_fallback = {
+                    "Host": "elearn.crwilladmin.com",
+                    "appver": "240",
+                    "apptype": "android",
+                    "cwkey": generate_cwkey(),
+                    "content-type": "application/json; charset=UTF-8",
+                    "user-agent": "okhttp/5.0.0-alpha.2"
+                }
+                data_fallback = {
+                    "deviceType": "android",
+                    "password": password,
+                    "deviceModel": "Xiaomi M2007J20CI",
+                    "deviceVersion": "Q(Android 10.0)",
+                    "email": email,
+                    "deviceIMEI": "d57adbd8a7b8u9i9",
+                    "deviceToken": "fake_device_token"
+                }
+                for endpoint in ["https://elearn.crwilladmin.com/api/v10/login-other", "https://elearn.crwilladmin.com/api/v9/login-other"]:
+                    try:
+                        resp = requests.post(endpoint, headers=headers_fallback, json=data_fallback, timeout=10)
+                        if resp.status_code == 200:
+                            res_json = resp.json()
+                            token = res_json.get("data", {}).get("token")
+                            if token:
+                                login_success = True
+                                break
+                    except Exception:
+                        pass
 
             if not login_success or not token:
                 await message.reply_text("❌ **Login Failed!**\nPlease check your email/mobile and password, or provide a direct session Token.")

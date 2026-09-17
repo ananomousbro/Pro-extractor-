@@ -151,7 +151,7 @@ def decrypt_utk_web(ciphertext, salt=None):
 def get_utk_guest_jwt():
     """Fetch guest JWT token required by application.utkarshapp.com API"""
     try:
-        r = requests.get("https://utkarsh.com/api/guest-login", headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        r = requests.get("https://utkarsh.com/api/guest-login", headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) utkarsh_windows_64/0.3.6 Chrome/108.0.5359.215 Electron/22.3.24 Safari/537.36"}, timeout=10)
         data = r.json()
         return data.get("jwt", "")
     except Exception as e:
@@ -179,7 +179,7 @@ def send_utk_otp(mobile):
             "Devicetype": "4",
             "Authorization": "Bearer 01*#NerglnwwebOI)30@I*Dm'@@",
             "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) utkarsh_windows_64/0.3.6 Chrome/108.0.5359.215 Electron/22.3.24 Safari/537.36",
             "Userid": "0"
         }
         if guest_jwt:
@@ -222,7 +222,7 @@ def verify_utk_otp(mobile, otp, guest_jwt, sess):
             "Devicetype": "4",
             "Authorization": "Bearer 01*#NerglnwwebOI)30@I*Dm'@@",
             "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) utkarsh_windows_64/0.3.6 Chrome/108.0.5359.215 Electron/22.3.24 Safari/537.36",
             "Userid": "0"
         }
         if guest_jwt:
@@ -290,7 +290,7 @@ async def handle_utk_logic(app, m):
         'accept': 'application/json, text/javascript, */*; q=0.01',
         'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
         'x-requested-with': 'XMLHttpRequest',
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) utkarsh_windows_64/0.3.6 Chrome/108.0.5359.215 Electron/22.3.24 Safari/537.36',
         'origin': 'https://online.utkarsh.com',
         'referer': 'https://online.utkarsh.com/web/Study/index'
     }

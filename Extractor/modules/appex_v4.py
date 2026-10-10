@@ -144,9 +144,12 @@ async def process_video(session, api_base, bi, si, sn, ti, tn, video, hdr1, toda
                 k = first_link.get("key")
                 if a and k:
                     da = decrypt(a)
-                    k1 = decrypt(k)
-                    k2 = decode_base64(k1)
-                    lines.append(f"{vt}:{da}*{k2}\n")
+                    if da and da.startswith("http"):
+                        lines.append(f"{vt}:{da}\n")
+                    else:
+                        k1 = decrypt(k)
+                        k2 = decode_base64(k1)
+                        lines.append(f"{vt}:{da}*{k2}\n")
                 elif a:
                     da = decrypt(a)
                     lines.append(f"{vt}:{da}\n")
@@ -155,48 +158,29 @@ async def process_video(session, api_base, bi, si, sn, ti, tn, video, hdr1, toda
             mt = r4["data"]["material_type"]
             if mt == "PDF":
                 p1 = r4["data"].get("pdf_link", "")
-                pk1 = r4["data"].get("pdf_encryption_key", "")
                 p2 = r4["data"].get("pdf_link2", "")
-                pk2 = r4["data"].get("pdf2_encryption_key", "")
-                
-                if p1 and pk1:
+                if p1:
                     dp1 = decrypt(p1)
-                    depk1 = decrypt(pk1)
-                    if depk1 == "abcdefg":
+                    if dp1 and dp1.startswith("http"):
                         lines.append(f"{vt}:{dp1}\n")
-                    else:
-                        lines.append(f"{vt}:{dp1}*{depk1}\n")
-                if p2 and pk2:
+                if p2:
                     dp2 = decrypt(p2)
-                    depk2 = decrypt(pk2)
-                    if depk2 == "abcdefg":
+                    if dp2 and dp2.startswith("http"):
                         lines.append(f"{vt}:{dp2}\n")
-                    else:
-                        lines.append(f"{vt}:{dp2}*{depk2}\n")
 
-        
         if "material_type" in r4.get("data", {}):
             mt = r4["data"]["material_type"]
             if mt == "VIDEO":
                 p1 = r4["data"].get("pdf_link", "")
-                pk1 = r4["data"].get("pdf_encryption_key", "")
                 p2 = r4["data"].get("pdf_link2", "")
-                pk2 = r4["data"].get("pdf2_encryption_key", "")
-                
-                if p1 and pk1:
+                if p1:
                     dp1 = decrypt(p1)
-                    depk1 = decrypt(pk1)
-                    if depk1 == "abcdefg":
+                    if dp1 and dp1.startswith("http"):
                         lines.append(f"{vt}:{dp1}\n")
-                    else:
-                        lines.append(f"{vt}:{dp1}*{depk1}\n")
-                if p2 and pk2:
+                if p2:
                     dp2 = decrypt(p2)
-                    depk2 = decrypt(pk2)
-                    if depk2 == "abcdefg":
+                    if dp2 and dp2.startswith("http"):
                         lines.append(f"{vt}:{dp2}\n")
-                    else:
-                        lines.append(f"{vt}:{dp2}*{depk2}\n")
                         
         return lines
     

@@ -226,7 +226,7 @@ def extract_media_from_data(Title, data, drm_data=None):
         is_enc = data.get("is_pdf_encrypted", 0)
         if str(is_enc) == "1":
             key = appx_decrypt(data.get("pdf_encryption_key", "")) if data.get("pdf_encryption_key") else None
-            if key:
+            if key and key != "abcdefg":
                 output.append(f"{Title} PDF:{pdf_link}*{key}\n")
             else:
                 output.append(f"{Title} PDF:{pdf_link}\n")
@@ -238,7 +238,7 @@ def extract_media_from_data(Title, data, drm_data=None):
         is_enc2 = data.get("is_pdf2_encrypted", 0)
         if str(is_enc2) == "1":
             key2 = appx_decrypt(data.get("pdf2_encryption_key", "")) if data.get("pdf2_encryption_key") else None
-            if key2:
+            if key2 and key2 != "abcdefg":
                 output.append(f"{Title} PDF2:{pdf_link2}*{key2}\n")
             else:
                 output.append(f"{Title} PDF2:{pdf_link2}\n")

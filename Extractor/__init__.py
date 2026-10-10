@@ -39,7 +39,34 @@ app.waiting_input = {}
 
 async def info_bot():
     global BOT_ID, BOT_NAME, BOT_USERNAME
-    await app.start()
+    try:
+        await app.start()
+    except Exception as e:
+        err_str = str(e)
+        if "ACCESS_TOKEN_EXPIRED" in err_str or "AccessTokenExpired" in type(e).__name__:
+            # Remove stale session file
+            if os.path.exists("sessions"):
+                for sf in os.listdir("sessions"):
+                    if sf.endswith(".session") or sf.endswith(".session-journal"):
+                        try:
+                            os.remove(os.path.join("sessions", sf))
+                            logging.warning(f"Removed stale session file: {sf}")
+                        except Exception:
+                            pass
+            logging.error(
+                "\n" + "="*60 + "\n"
+                "❌ [CRITICAL ERROR] BOT_TOKEN EXPIRED / INVALID!\n"
+                "Telegram says: [400 ACCESS_TOKEN_EXPIRED]\n\n"
+                "समाधान (How to fix on Render):\n"
+                "1. Telegram पर @BotFather खोलें और नया टोकन लें (/token या /newbot)।\n"
+                "2. Render Dashboard -> Environment Variables में जाएं।\n"
+                "3. 'BOT_TOKEN' को नए टोकन से अपडेट करें।\n"
+                "4. Render पर 'Deploy' -> 'Clear build cache & deploy' करें।\n"
+                + "="*60 + "\n"
+            )
+            raise SystemExit(1)
+        raise e
+
     getme = await app.get_me()
     BOT_ID = getme.id
     BOT_USERNAME = getme.username

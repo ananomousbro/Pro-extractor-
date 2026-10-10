@@ -609,6 +609,21 @@ async def extract_batch(app, message, org_name, batch_id, ext_type="1"):
             # Return combined URL
             return f"{base_part}{encoded_path}"
 
+        def resolve_video_m3u8(thumb_url):
+            if not thumb_url:
+                return ""
+            url = thumb_url.strip()
+            if "thumbnail.png" in url:
+                url = url.replace("thumbnail.png", "master.m3u8")
+            elif url.endswith((".jpg", ".jpeg", ".png")):
+                url = url.rsplit("/", 1)[0] + "/master.m3u8"
+            
+            if "akamai-cdn.classplusapp.com/media/" in url and "/azure/" not in url:
+                url = url.replace("akamai-cdn.classplusapp.com/media/", "akamai-cdn.classplusapp.com/azure/media/")
+            elif "media-cdn.classplusapp.com/media/" in url and "/azure/" not in url:
+                url = url.replace("media-cdn.classplusapp.com/media/", "media-cdn.classplusapp.com/azure/media/")
+            return url
+
         async def fetch_live_videos(course_id):
             """Fetch live videos from the API with contentHashId."""
             outputs = []
@@ -624,12 +639,15 @@ async def extract_batch(app, message, org_name, batch_id, ext_type="1"):
                                 name = video.get("name", "Unknown Video")
                                 video_url = video.get("url", "")
                                 content_hash = video.get("contentHashId", "")
+                                if not video_url or video_url.endswith(("thumbnail.png", ".png", ".jpg", ".jpeg")):
+                                    video_url = resolve_video_m3u8(video.get("thumbnailUrl") or video_url)
                         
                                 if video_url:
                                     # Encode the latter part of the URL
                                     encoded_url = encode_partial_url(video_url)
-                                    # Include contentHashId as part of the output
-                                    outputs.append(f"{name}:\n{encoded_url}\ncontentHashId: {content_hash}\n")
+                                    if content_hash:
+                                        encoded_url += f"*UGxCP_hash={content_hash}"
+                                    outputs.append(f"{name}: {encoded_url}\n")
                 except Exception as e:
                     print(f"Error fetching live videos: {e}")
 
@@ -644,26 +662,34 @@ async def extract_batch(app, message, org_name, batch_id, ext_type="1"):
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=headers) as resp:
                     course_data = await resp.json()
-                    course_data = course_data["data"]["courseContent"]
+                    course_data = course_data.get("data", {}).get("courseContent", [])
 
             tasks = []
             for item in course_data:
                 content_type = str(item.get("contentType"))
                 sub_id = item.get("id")
                 sub_name = item.get("name", "Untitled")
-                video_url = item.get("url", "")
                 content_hash = item.get("contentHashId", "")
 
-                if content_type in ("2", "3"):  # Video or PDF
+                if content_type == "2":  # Video
                     if ext_type == "2" and not is_today_item(item):
                         continue
+                    video_url = item.get("url", "")
+                    if not video_url or video_url.endswith(("thumbnail.png", ".png", ".jpg", ".jpeg")):
+                        video_url = resolve_video_m3u8(item.get("thumbnailUrl") or video_url)
                     if video_url:
-                        # Encode the latter part of the URL
                         encoded_url = encode_partial_url(video_url)
                         if content_hash:
-                            encoded_url += f"*UGxCP_hash={content_hash}\n"
-                        full_info = f"{folder_path}{sub_name}: {encoded_url}"
-                        result.append(full_info)
+                            encoded_url += f"*UGxCP_hash={content_hash}"
+                        result.append(f"{folder_path}{sub_name}: {encoded_url}\n")
+
+                elif content_type == "3":  # Document / PDF
+                    if ext_type == "2" and not is_today_item(item):
+                        continue
+                    pdf_url = item.get("url") or item.get("attachmentUrl") or item.get("documentUrl")
+                    if pdf_url:
+                        encoded_url = encode_partial_url(pdf_url)
+                        result.append(f"{folder_path}{sub_name}: {encoded_url}\n")
 
                 elif content_type == "1":  # Folder
                     new_folder_path = f"{folder_path}{sub_name} - "

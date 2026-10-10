@@ -213,8 +213,18 @@ async def get_cpwp_course_content(session: aiohttp.ClientSession, headers: Dict[
                         elif "media-cdn.classplusapp.com/drm/" in url_val and url_val.endswith('.png'):
                             video_id = url_val.split('/')[-3]
                             url_val = f'https://media-cdn.classplusapp.com/drm/{video_id}/playlist.m3u8'
+                        elif "https://akamai-cdn.classplusapp.com" in url_val and ("cc/" in url_val or "lc/" in url_val or "uc/" in url_val or "dy/" in url_val) and url_val.endswith('.png'):
+                            url_val = url_val.replace('thumbnail.png', 'master.m3u8')
+                            if "akamai-cdn.classplusapp.com/media/" in url_val and "/azure/" not in url_val:
+                                url_val = url_val.replace("akamai-cdn.classplusapp.com/media/", "akamai-cdn.classplusapp.com/azure/media/")
                         elif "https://media-cdn.classplusapp.com" in url_val and ("cc/" in url_val or "lc/" in url_val or "uc/" in url_val or "dy/" in url_val) and url_val.endswith('.png'):
                             url_val = url_val.replace('thumbnail.png', 'master.m3u8')
+                            if "media-cdn.classplusapp.com/media/" in url_val and "/azure/" not in url_val:
+                                url_val = url_val.replace("media-cdn.classplusapp.com/media/", "media-cdn.classplusapp.com/azure/media/")
+                        elif "thumbnail.png" in url_val:
+                            url_val = url_val.replace('thumbnail.png', 'master.m3u8')
+                            if "akamai-cdn.classplusapp.com/media/" in url_val and "/azure/" not in url_val:
+                                url_val = url_val.replace("akamai-cdn.classplusapp.com/media/", "akamai-cdn.classplusapp.com/azure/media/")
                         elif "https://tb-video.classplusapp.com" in url_val and url_val.endswith('.jpg'):
                             video_id = url_val.split('/')[-1].split('.')[0]
                             url_val = f'https://tb-video.classplusapp.com/{video_id}/master.m3u8'

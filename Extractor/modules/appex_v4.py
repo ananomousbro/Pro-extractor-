@@ -122,37 +122,60 @@ async def process_video(session, api_base, bi, si, sn, ti, tn, video, hdr1, toda
         if today_only and not is_today_appx_item(video, r4.get("data", {})):
             return None
 
-        vt = r4.get("data", {}).get("Title", "")
+        vt = r4.get("data", {}).get("Title", "") or vn or f"Video {vi}"
         vl = r4.get("data", {}).get("download_link", "")
         fl = r4.get("data", {}).get("video_id", "")
         
+        # Check YouTube video
         if fl:
             dfl = decrypt(fl)
-            final_link = f"https://youtu.be/{dfl}"
-            lines.append(f"{vt}:{final_link}\n")
+            if dfl:
+                final_link = f"https://youtu.be/{dfl}" if not dfl.startswith("http") else dfl
+                lines.append(f"{vt}:{final_link}\n")
 
+        # Check direct download link
         if vl:
             dvl = decrypt(vl)
-            if ".pdf" not in dvl: 
+            if dvl and dvl.startswith("http") and ".pdf" not in dvl:
                 lines.append(f"{vt}:{dvl}\n")
                  
-        else:
-            encrypted_links = r4.get("data", {}).get("encrypted_links", [])
-            if encrypted_links:
-                first_link = encrypted_links[0]
-                a = first_link.get("path")
-                k = first_link.get("key")
-                if a and k:
-                    da = decrypt(a)
-                    if da and da.startswith("http"):
-                        lines.append(f"{vt}:{da}\n")
-                    else:
-                        k1 = decrypt(k)
-                        k2 = decode_base64(k1)
-                        lines.append(f"{vt}:{da}*{k2}\n")
-                elif a:
-                    da = decrypt(a)
-                    lines.append(f"{vt}:{da}\n")
+        # Check encrypted_links / webdrm_links
+        encrypted_links = r4.get("data", {}).get("encrypted_links", [])
+        webdrm_links = r4.get("data", {}).get("webdrm_links", [])
+        
+        all_stream_sources = []
+        if isinstance(encrypted_links, list):
+            all_stream_sources.extend(encrypted_links)
+        if isinstance(webdrm_links, list):
+            all_stream_sources.extend(webdrm_links)
+            
+        for stream_item in all_stream_sources:
+            if isinstance(stream_item, dict):
+                path = stream_item.get("path") or stream_item.get("url") or stream_item.get("link")
+                key = stream_item.get("key")
+                if path:
+                    dec_path = decrypt(path)
+                    if dec_path and dec_path.startswith("http"):
+                        lines.append(f"{vt}:{dec_path}\n")
+                        break
+                    elif key:
+                        dec_key = decode_base64(decrypt(key))
+                        lines.append(f"{vt}:{dec_path}*{dec_key}\n")
+                        break
+            elif isinstance(stream_item, str) and stream_item.strip():
+                dec_item = decrypt(stream_item)
+                if dec_item and dec_item.startswith("http"):
+                    lines.append(f"{vt}:{dec_item}\n")
+                    break
+
+        # Check alternative video fields
+        for alt_field in ["video_link", "hls_link", "stream_url", "video_url"]:
+            val = r4.get("data", {}).get(alt_field)
+            if val:
+                d_val = decrypt(val)
+                if d_val and d_val.startswith("http") and not any(d_val in l for l in lines):
+                    lines.append(f"{vt}:{d_val}\n")
+                    break
         
         if "material_type" in r4.get("data", {}):
             mt = r4["data"]["material_type"]

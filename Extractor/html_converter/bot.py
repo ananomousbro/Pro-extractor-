@@ -27,9 +27,10 @@ def extract_names_and_urls(file_content):
                     url = parts[1].strip()
                     url = url.strip('"').strip("'").strip()
                     
-                    # Handle classplusapp URLs
+                    # Handle classplusapp URLs - keep direct or use direct streaming URL
                     if "media-cdn.classplusapp.com" in url:
-                        url = f"https://api.extractor.workers.dev/player?url={url}"
+                        # Keep original or ensure direct playable url format
+                        pass
                     
                     data.append((name, url))
                     break

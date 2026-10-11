@@ -621,7 +621,8 @@ async def extract_batch(app, message, org_name, batch_id, ext_type="1"):
                                     continue
                                 name = video.get("name", "Unknown Video")
                                 video_url = video.get("url", "")
-                                if not video_url or video_url.endswith(("thumbnail.png", ".png", ".jpg", ".jpeg")):
+                                # If url already contains playable stream (m3u8/mp4), preserve it with its signature tokens
+                                if not video_url or (any(video_url.endswith(ext) for ext in [".png", ".jpg", ".jpeg"]) and ".m3u8" not in video_url):
                                     video_url = resolve_video_m3u8(video.get("thumbnailUrl") or video_url)
                         
                                 if video_url:
@@ -653,7 +654,8 @@ async def extract_batch(app, message, org_name, batch_id, ext_type="1"):
                     if ext_type == "2" and not is_today_item(item):
                         continue
                     video_url = item.get("url", "")
-                    if not video_url or video_url.endswith(("thumbnail.png", ".png", ".jpg", ".jpeg")):
+                    # If item already has a full streaming URL (with m3u8), preserve all query/signature params
+                    if not video_url or (any(video_url.endswith(ext) for ext in [".png", ".jpg", ".jpeg"]) and ".m3u8" not in video_url):
                         video_url = resolve_video_m3u8(item.get("thumbnailUrl") or video_url)
                     if video_url:
                         clean_url = clean_direct_url(video_url)

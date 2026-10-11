@@ -1077,23 +1077,48 @@ def generate_html(file_name, videos, pdfs, others):
             
             if (url.includes('.m3u8')) {
                 if (Hls.isSupported()) {
-                    const hls = new Hls();
+                    if (window.currentHls) {
+                        window.currentHls.destroy();
+                    }
+                    const hls = new Hls({
+                        enableWorker: true,
+                        lowLatencyMode: true,
+                        xhrSetup: function (xhr, u) {
+                            xhr.withCredentials = false;
+                        }
+                    });
+                    window.currentHls = hls;
                     hls.loadSource(url);
                     hls.attachMedia(player.media);
                     hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                        player.play();
+                        player.play().catch(() => {});
+                    });
+                    hls.on(Hls.Events.ERROR, function (event, data) {
+                        if (data.fatal) {
+                            switch (data.type) {
+                                case Hls.ErrorTypes.NETWORK_ERROR:
+                                    hls.startLoad();
+                                    break;
+                                case Hls.ErrorTypes.MEDIA_ERROR:
+                                    hls.recoverMediaError();
+                                    break;
+                                default:
+                                    hls.destroy();
+                                    break;
+                            }
+                        }
                     });
                 } else if (player.media.canPlayType('application/vnd.apple.mpegurl')) {
                     source.src = url;
                     source.type = 'application/x-mpegURL';
                     player.source = source;
-                    player.play();
+                    player.play().catch(() => {});
                 }
             } else {
                 source.src = url;
                 source.type = 'video/mp4';
                 player.source = source;
-                player.play();
+                player.play().catch(() => {});
             }
         }
         

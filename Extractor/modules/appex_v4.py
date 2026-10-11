@@ -181,14 +181,45 @@ async def process_video(session, api_base, bi, si, sn, ti, tn, video, hdr1, toda
                 stream_found = True
 
         # 4. Check alternative video fields
+        user_auth_token = hdr1.get("Authorization") or ""
         if not stream_found:
-            for alt_field in ["video_link", "hls_link", "stream_url", "video_url", "file_link", "recording_hls"]:
+            for alt_field in ["video_link", "hls_link", "stream_url", "video_url", "file_link", "recording_hls", "video_player_url", "video_player_lower_url"]:
                 val = r4.get("data", {}).get(alt_field)
                 if val:
                     d_val = decrypt(val)
-                    if d_val and is_clean_url(d_val) and not any(d_val in l for l in lines):
-                        lines.append(f"{vt}:{d_val}\n")
-                        break
+                    if d_val:
+                        if "player.appx.co.in" in d_val:
+                            if user_auth_token and ("token=" in d_val and (d_val.endswith("token=") or "&token=&" in d_val)):
+                                resolved_player = d_val.replace("token=", f"token={user_auth_token}")
+                                lines.append(f"{vt}:{resolved_player}\n")
+                                stream_found = True
+                                break
+                            elif is_clean_url(d_val):
+                                lines.append(f"{vt}:{d_val}\n")
+                                stream_found = True
+                                break
+                        elif is_clean_url(d_val) and not any(d_val in l for l in lines):
+                            lines.append(f"{vt}:{d_val}\n")
+                            stream_found = True
+                            break
+
+        # 5. MPD DRM links endpoint fallback
+        if not stream_found and vi:
+            for fw in [1, 0]:
+                try:
+                    drm_res = await fetch(session, f"{api_base}/get/get_mpd_drm_links?videoid={vi}&folder_wise_course={fw}", hdr1)
+                    if drm_res and isinstance(drm_res, dict) and drm_res.get("data"):
+                        drm_list = drm_res["data"]
+                        if isinstance(drm_list, list) and len(drm_list) > 0:
+                            drm_path = drm_list[0].get("path", "")
+                            if drm_path:
+                                dec_drm = decrypt(drm_path)
+                                if dec_drm and is_clean_url(dec_drm):
+                                    lines.append(f"{vt}:{dec_drm}\n")
+                                    stream_found = True
+                                    break
+                except Exception:
+                    pass
         
         if "material_type" in r4.get("data", {}):
             mt = r4["data"]["material_type"]

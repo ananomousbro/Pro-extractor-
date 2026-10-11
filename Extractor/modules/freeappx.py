@@ -214,6 +214,8 @@ def extract_media_from_data(Title, data, drm_data=None):
                             video_url = dec
                         break
 
+    auth_token = data.get("user_token") or data.get("token") or ""
+
     # 3. Fallback to direct video fields
     if not video_url:
         for field in ["download_link", "download_link2", "recording_hls", "hls_url",
@@ -222,9 +224,18 @@ def extract_media_from_data(Title, data, drm_data=None):
             val = data.get(field)
             if val and isinstance(val, str) and val.strip():
                 dec = appx_decrypt(val)
-                if dec and is_clean_playable(dec):
-                    video_url = dec
-                    break
+                if dec:
+                    if "player.appx.co.in" in dec:
+                        if auth_token and ("token=" in dec and (dec.endswith("token=") or "&token=&" in dec)):
+                            # Attach user auth token to make player functional
+                            video_url = dec.replace("token=", f"token={auth_token}")
+                            break
+                        elif is_clean_playable(dec):
+                            video_url = dec
+                            break
+                    elif is_clean_playable(dec):
+                        video_url = dec
+                        break
 
     # 4. YouTube fallback
     if not video_url:
@@ -344,18 +355,21 @@ async def fetch_appx_video_id_details_v2(session, api, selected_batch_id, video_
 
         if res and res.get('data'):
             data = res['data']
+            data["user_token"] = headers.get("Authorization") or ""
             Title = data.get("Title", f"Video_{video_id}")
             
-            # Quick check if media is already directly extractable
+            # Quick check if video stream is already directly extractable
             initial_media = extract_media_from_data(Title, data, None)
-            if initial_media:
+            has_video = any(":" in line and "PDF" not in line for line in initial_media)
+            if has_video:
                 return initial_media
             
-            # Only call MPD DRM endpoint if direct link not found
+            # If video not yet found, call MPD DRM endpoint to fetch stream
             drm_res = await fetch_appx_html_to_json(session, f"{api}/get/get_mpd_drm_links?videoid={video_id}&folder_wise_course={folder_wise_course}", headers)
             drm_data = drm_res.get('data', []) if drm_res else []
             
-            return extract_media_from_data(Title, data, drm_data)
+            final_media = extract_media_from_data(Title, data, drm_data)
+            return final_media if final_media else initial_media
         return []
     except Exception as e:
         logging.error(f"Error in fetch_appx_video_id_details_v2: {e}")

@@ -365,10 +365,25 @@ async def exampur_txt(app, message):
                 if vip_choice in ["all", "सब", "all batches", "all batch"]:
                     courses_to_extract = subcourses
                 else:
-                    target_ids = [tid.strip() for tid in vip_choice.split("&")]
-                    courses_to_extract = [sc for sc in subcourses if str(sc.get("id")) in target_ids]
-                    if not courses_to_extract:
-                        courses_to_extract = [{"id": tid, "title": f"Batch_{tid}"} for tid in target_ids]
+                    target_tokens = [tok.strip() for tok in re.split(r"[&,\s]+", vip_choice) if tok.strip()]
+                    chosen = []
+                    for tok in target_tokens:
+                        # 1. Check if token is index number (1, 2, 3...)
+                        if tok.isdigit() and 1 <= int(tok) <= len(subcourses):
+                            idx = int(tok) - 1
+                            if subcourses[idx] not in chosen:
+                                chosen.append(subcourses[idx])
+                        else:
+                            # 2. Check if token matches actual subcourse ID
+                            matched = [sc for sc in subcourses if str(sc.get("id")) == tok]
+                            for m in matched:
+                                if m not in chosen:
+                                    chosen.append(m)
+                    
+                    if chosen:
+                        courses_to_extract = chosen
+                    else:
+                        courses_to_extract = [{"id": tid, "title": f"Batch_{tid}"} for tid in target_tokens]
             else:
                 courses_to_extract = [{"id": selected_batch_id, "title": f"Batch_{selected_batch_id}"}]
         except Exception as ce:
@@ -391,7 +406,7 @@ async def exampur_txt(app, message):
             )
 
             try:
-                c_combo_id = selected_batch_id
+                c_combo_id = selected_batch_id if is_combo else None
                 items = extract_course_contents(c_id, t_user, jwt_token, user_id, today_only=today_only, combo_course_id=c_combo_id)
                 for item_title, item_url in items:
                     all_urls.append(f"{item_title}:{item_url}")

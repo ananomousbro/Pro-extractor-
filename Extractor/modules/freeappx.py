@@ -21,8 +21,8 @@ from base64 import b64decode
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 import config
-from Extractor.core.utils import forward_to_log, send_to_log
 from datetime import datetime
+from Extractor.modules.mix import normalize_to_direct_stream
 import pytz
 # from Extractor.modules.enc import process_file_content  # Add encryption import
 
@@ -245,7 +245,8 @@ def extract_media_from_data(Title, data, drm_data=None):
                 video_url = f"https://www.youtube.com/watch?v={yt_id}"
 
     if video_url:
-        output.append(f"{Title}:{video_url}\n")
+        norm_v = normalize_to_direct_stream(video_url)
+        output.append(f"{Title}:{norm_v}\n")
 
     # PDFs
     pdf_link = appx_decrypt(data.get("pdf_link", "")) if data.get("pdf_link") else None

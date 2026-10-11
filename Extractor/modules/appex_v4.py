@@ -9,8 +9,7 @@ import os
 import asyncio
 import aiohttp
 import base64
-from Crypto.Cipher import AES
-from Extractor.modules.mix import v2_new, parse_json_safe, decrypt
+from Extractor.modules.mix import v2_new, parse_json_safe, decrypt, normalize_to_direct_stream
 from Extractor.core.utils import forward_to_log, send_to_log
 from pyrogram.types import User
 from Crypto.Util.Padding import unpad
@@ -159,17 +158,19 @@ async def process_video(session, api_base, bi, si, sn, ti, tn, video, hdr1, toda
                 if path:
                     dec_path = decrypt(path)
                     if dec_path and is_clean_url(dec_path):
+                        norm_p = normalize_to_direct_stream(dec_path)
                         if key:
                             dec_key = decode_base64(decrypt(key))
-                            lines.append(f"{vt}:{dec_path}*{dec_key}\n")
+                            lines.append(f"{vt}:{norm_p}*{dec_key}\n")
                         else:
-                            lines.append(f"{vt}:{dec_path}\n")
+                            lines.append(f"{vt}:{norm_p}\n")
                         stream_found = True
                         break
             elif isinstance(stream_item, str) and stream_item.strip():
                 dec_item = decrypt(stream_item)
                 if dec_item and is_clean_url(dec_item):
-                    lines.append(f"{vt}:{dec_item}\n")
+                    norm_item = normalize_to_direct_stream(dec_item)
+                    lines.append(f"{vt}:{norm_item}\n")
                     stream_found = True
                     break
 
@@ -177,7 +178,8 @@ async def process_video(session, api_base, bi, si, sn, ti, tn, video, hdr1, toda
         if not stream_found and vl:
             dvl = decrypt(vl)
             if dvl and is_clean_url(dvl) and ".pdf" not in dvl:
-                lines.append(f"{vt}:{dvl}\n")
+                norm_vl = normalize_to_direct_stream(dvl)
+                lines.append(f"{vt}:{norm_vl}\n")
                 stream_found = True
 
         # 4. Check alternative video fields
@@ -199,7 +201,8 @@ async def process_video(session, api_base, bi, si, sn, ti, tn, video, hdr1, toda
                                 stream_found = True
                                 break
                         elif is_clean_url(d_val) and not any(d_val in l for l in lines):
-                            lines.append(f"{vt}:{d_val}\n")
+                            norm_val = normalize_to_direct_stream(d_val)
+                            lines.append(f"{vt}:{norm_val}\n")
                             stream_found = True
                             break
 
@@ -215,7 +218,8 @@ async def process_video(session, api_base, bi, si, sn, ti, tn, video, hdr1, toda
                             if drm_path:
                                 dec_drm = decrypt(drm_path)
                                 if dec_drm and is_clean_url(dec_drm):
-                                    lines.append(f"{vt}:{dec_drm}\n")
+                                    norm_drm = normalize_to_direct_stream(dec_drm)
+                                    lines.append(f"{vt}:{norm_drm}\n")
                                     stream_found = True
                                     break
                 except Exception:

@@ -205,6 +205,38 @@ def decode_base64(encoded_str):
     except Exception as e:
         return ""
 
+def normalize_to_direct_stream(url: str) -> str:
+    """Normalize any protected or complex CDN link into a permanent direct playable stream."""
+    if not url or not isinstance(url, str):
+        return ""
+    u = url.strip()
+    
+    # 1. CCBP / AWS S3 / CloudFront Direct Streams - Already permanent and direct
+    if any(k in u for k in ["live-class-media-content.ccbp.in", "cloudfront.net", "amazonaws.com", "wasabisys.com"]):
+        # Strip transient edge tokens if it's already a direct S3 vod playlist
+        if "playlist.m3u8" in u or "index_" in u:
+            return u
+
+    # 2. Utkarsh Direct MP4 format
+    if "utkarshapp.com" in u and ("jwplatform" in u or "enc_plain_mp4" in u):
+        parts = u.split("/")[-1].split("_")[0]
+        if parts:
+            return f"https://apps-s3-jw-prod.utkarshapp.com/admin_v1/file_library/videos/enc_plain_mp4/{parts}/plain/720x1280.mp4"
+
+    # 3. Classplus Akamai Direct HLS
+    if "classplusapp.com" in u:
+        if "thumbnail.png" in u:
+            u = u.replace("thumbnail.png", "master.m3u8")
+        elif any(u.endswith(ext) for ext in [".jpg", ".jpeg", ".png"]):
+            u = u.rsplit("/", 1)[0] + "/master.m3u8"
+        if "akamai-cdn.classplusapp.com/media/" in u and "/azure/" not in u:
+            u = u.replace("akamai-cdn.classplusapp.com/media/", "akamai-cdn.classplusapp.com/azure/media/")
+        elif "media-cdn.classplusapp.com/media/" in u and "/azure/" not in u:
+            u = u.replace("media-cdn.classplusapp.com/media/", "media-cdn.classplusapp.com/azure/media/")
+        return u
+
+    return u
+
 def is_today_mix_item(item_obj, data_obj=None):
     today_ist = datetime.now(pytz.timezone('Asia/Kolkata')).date()
     objs = [item_obj]

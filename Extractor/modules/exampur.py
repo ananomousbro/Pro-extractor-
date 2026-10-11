@@ -183,8 +183,20 @@ def extract_course_contents(course_id: str, t_user: str, jwt_token: str, user_id
                             continue
 
                         f_title = f.get("title", "").strip()
-                        f_url = f.get("file_url", "").strip()
+                        f_url = f.get("file_url", "").strip() or f.get("video_url", "").strip() or f.get("url", "").strip()
                         v_type = str(f.get("video_type", ""))
+                        v_id = str(f.get("id", ""))
+                        
+                        # If video URL is not directly present, query content meta
+                        if not f_url and v_id:
+                            try:
+                                meta_payload = {"id": v_id}
+                                meta_res = api_post("poll//get_content_meta", meta_payload, t_user, jwt_token, user_id)
+                                if meta_res.get("status"):
+                                    m_data = meta_res.get("data", {})
+                                    f_url = m_data.get("file_url") or m_data.get("video_url") or m_data.get("url") or ""
+                            except Exception as me:
+                                logger.error(f"Error fetching content meta: {me}")
                         
                         # Formatting video URLs
                         if v_type == "1" or "youtube.com" in f_url or "youtu.be" in f_url or (f_url and not f_url.startswith("http") and len(f_url) < 20):
@@ -211,11 +223,16 @@ def extract_course_contents(course_id: str, t_user: str, jwt_token: str, user_id
                             except Exception as pe:
                                 logger.error(f"Error fetching PDF: {pe}")
                     
-                    # Traverse subfolders
-                    folder_results = res_data.get("folder_result", [])
-                    for sub_f in folder_results:
-                        sub_id = str(sub_f.get("id"))
-                        fetch_folder(folder_id=sub_id, parent_id=folder_id, page=1)
+                    # Check if there are more pages in this folder
+                    if len(file_results) >= 10:
+                        fetch_folder(folder_id=folder_id, parent_id=parent_id, page=page + 1)
+
+                    # Traverse subfolders only on page 1 to prevent duplicate folder calls
+                    if page == 1:
+                        folder_results = res_data.get("folder_result", [])
+                        for sub_f in folder_results:
+                            sub_id = str(sub_f.get("id"))
+                            fetch_folder(folder_id=sub_id, parent_id=folder_id, page=1)
             except Exception as fe:
                 logger.error(f"Error in folder {folder_id}: {fe}")
         

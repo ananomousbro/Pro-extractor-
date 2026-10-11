@@ -308,22 +308,29 @@ async def fetch_item_details(session, api_base, course_id, item, headers, today_
                         vl = dl_obj["path"]
                         break
 
+        def is_valid_playable(u):
+            if not u or not isinstance(u, str):
+                return False
+            u_clean = u.strip()
+            if "player.appx.co.in" in u_clean and ("token=" not in u_clean or u_clean.endswith("token=") or "&token=&" in u_clean):
+                return False
+            return any(ext in u_clean for ext in [".m3u8", ".mpd", ".mp4", "transcoded-videos", "classx.co.in/videos", "media-cdn", "akamai-cdn"]) or (u_clean.startswith("http") and ".pdf" not in u_clean.lower() and "player.appx.co.in" not in u_clean)
+
         if vl:
             dvl = decrypt(str(vl))
-            if dvl and ("http" in dvl or ".mpd" in dvl or ".m3u8" in dvl or ".mp4" in dvl or ".pdf" in dvl):
-                if ".pdf" in dvl.lower():
-                    outputs.append(f"{vt} PDF:{dvl}")
-                else:
-                    outputs.append(f"{vt}:{dvl}")
+            if dvl and is_valid_playable(dvl):
+                outputs.append(f"{vt}:{dvl}")
                 video_found = True
-        elif stream_url:
+            elif dvl and ".pdf" in dvl.lower():
+                outputs.append(f"{vt} PDF:{dvl}")
+        
+        if not video_found and stream_url:
             ds = decrypt(str(stream_url))
-            if ds and ("http" in ds or ".mpd" in ds or ".m3u8" in ds or ".mp4" in ds or ".pdf" in ds):
-                if ".pdf" in ds.lower():
-                    outputs.append(f"{vt} PDF:{ds}")
-                else:
-                    outputs.append(f"{vt}:{ds}")
+            if ds and is_valid_playable(ds):
+                outputs.append(f"{vt}:{ds}")
                 video_found = True
+            elif ds and ".pdf" in ds.lower():
+                outputs.append(f"{vt} PDF:{ds}")
 
         # 3. Encrypted links & WebDRM links
         if not video_found:

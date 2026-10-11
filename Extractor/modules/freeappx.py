@@ -185,30 +185,46 @@ def extract_media_from_data(Title, data, drm_data=None):
             if dec_path:
                 video_url = dec_path
 
-    # 2. Fallback to direct video fields
+    def is_clean_playable(u):
+        if not u or not isinstance(u, str):
+            return False
+        uc = u.strip()
+        if "player.appx.co.in" in uc and ("token=" not in uc or uc.endswith("token=") or "&token=&" in uc):
+            return False
+        return any(ext in uc for ext in [".m3u8", ".mpd", ".mp4", "classx.co.in", "appx.co.in/paid", "transcoded-videos"]) or (uc.startswith("http") and "player.appx.co.in" not in uc)
+
+    # 2. Prioritize encrypted_links / webdrm_links first (they contain the actual DRM / master HLS streams)
+    enc_links = data.get("encrypted_links") or data.get("webdrm_links")
+    if enc_links and isinstance(enc_links, list):
+        for el in enc_links:
+            if isinstance(el, dict):
+                p = el.get("path") or el.get("url") or el.get("link")
+                k = el.get("key")
+                if p:
+                    dec = appx_decrypt(p)
+                    if dec and is_clean_playable(dec):
+                        if k:
+                            dec_k = appx_decrypt(k)
+                            try:
+                                dec_k2 = base64.b64decode(dec_k).decode('utf-8', errors='ignore')
+                                video_url = f"{dec}*{dec_k2}" if dec_k2 else dec
+                            except Exception:
+                                video_url = f"{dec}*{dec_k}"
+                        else:
+                            video_url = dec
+                        break
+
+    # 3. Fallback to direct video fields
     if not video_url:
-        for field in ["download_link", "download_link2", "file_link", "video_player_url",
-                      "video_player_lower_url", "video_url", "hls_url", "recording_hls",
-                      "stream_url", "video_path", "link"]:
+        for field in ["download_link", "download_link2", "recording_hls", "hls_url",
+                      "stream_url", "video_url", "file_link", "video_player_url",
+                      "video_player_lower_url", "video_path", "link"]:
             val = data.get(field)
             if val and isinstance(val, str) and val.strip():
                 dec = appx_decrypt(val)
-                if dec and ("http" in dec or ".mpd" in dec or ".m3u8" in dec or ".mp4" in dec):
+                if dec and is_clean_playable(dec):
                     video_url = dec
                     break
-
-    # 3. Encrypted links list
-    if not video_url:
-        enc_links = data.get("encrypted_links")
-        if enc_links and isinstance(enc_links, list):
-            for el in enc_links:
-                if isinstance(el, dict):
-                    p = el.get("path") or el.get("url") or el.get("link")
-                    if p:
-                        dec = appx_decrypt(p)
-                        if dec:
-                            video_url = dec
-                            break
 
     # 4. YouTube fallback
     if not video_url:
